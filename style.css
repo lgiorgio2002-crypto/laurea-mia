@@ -64,6 +64,31 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Strato ambient: la luce calda che sta sul foglio si muove appena, come
+   una lampada da scrivania. Solo transform e opacity, su un livello fisso
+   e inerte, così non costa nulla durante lo scroll. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(42% 34% at 50% 14%, rgba(209, 161, 63, 0.14), transparent 70%);
+  animation: lamp 32s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+@keyframes lamp {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: translate3d(1.5%, 2%, 0) scale(1.09);
+    opacity: 1;
+  }
+}
+
 /* Paper grain. Fixed and inert so it never repaints with scroll. */
 .grain {
   position: fixed;
@@ -333,5 +358,8 @@ main {
   *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    /* Senza questo, un loop alternato a 0.01ms diventa uno sfarfallio. */
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
   }
 }

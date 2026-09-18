@@ -1,4 +1,4 @@
-import { animate, stagger } from "https://cdn.jsdelivr.net/npm/motion@11/+esm";
+import { animate, inView, stagger } from "https://cdn.jsdelivr.net/npm/motion@11/+esm";
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const canHover = window.matchMedia("(hover: hover)").matches;
@@ -12,42 +12,73 @@ const PHOTO_MANIFEST = Array.from({ length: 12 }, (_, i) => `photos/${i + 1}.jpg
    a ogni render. */
 const TILTS = [-1.6, 1.1, -0.7, 1.5, -1.2, 0.8, -1.4, 1.3, -0.9, 1.6, -1.1, 0.7];
 
+/* Decelerazione per gli arrivi. */
 const EASE_OUT = [0.16, 1, 0.3, 1];
+/* Accelerazione per le uscite: parte piano, se ne va decisa. */
+const EASE_IN = [0.3, 0, 1, 1];
+/* Il passo della penna: accelera appena, procede quasi costante, si ferma. */
+const EASE_PEN = [0.4, 0, 0.6, 1];
+
+const INK_HIDDEN = "inset(0 100% 0 0)";
+const INK_WRITTEN = "inset(0 0% 0 0)";
+
+/* La calligrafia si scrive sempre da sola, ovunque compaia: è una regola
+   del mondo della pagina, non un effetto applicato a caso. */
+function prepareInk(scope) {
+  const ink = scope.querySelectorAll(".ink");
+  if (!ink.length || reduceMotion) return null;
+  ink.forEach((el) => {
+    el.style.clipPath = INK_HIDDEN;
+  });
+  return ink;
+}
+
+function writeInk(ink, startDelay = 0) {
+  return animate(
+    ink,
+    { clipPath: [INK_HIDDEN, INK_WRITTEN] },
+    { delay: stagger(0.2, { start: startDelay }), duration: 0.46, easing: EASE_PEN }
+  );
+}
 
 /* Il momento d'autore della pagina: l'arrivo dopo la scansione del QR.
-   Il titolo sale da sotto una maschera, la nota si scrive da sinistra. */
+   Il titolo sale da sotto una maschera, poi la nota si scrive. */
 function heroArrival() {
+  if (reduceMotion) return;
+
   const lines = document.querySelectorAll(".hero__line");
   const sub = document.querySelector(".hero__sub");
-  const ink = document.querySelectorAll(".hero__note .ink");
-
-  if (reduceMotion) return;
+  const ink = prepareInk(document.querySelector(".hero__note"));
 
   lines.forEach((el) => {
     el.style.clipPath = "inset(100% 0 0 0)";
   });
   sub.style.opacity = 0;
-  ink.forEach((el) => {
-    el.style.clipPath = "inset(0 100% 0 0)";
-  });
 
   animate(
     lines,
     { clipPath: ["inset(100% 0 0 0)", "inset(0% 0 0 0)"], y: [28, 0] },
-    { delay: stagger(0.14), duration: 0.9, easing: EASE_OUT }
+    { delay: stagger(0.12), duration: 0.8, easing: EASE_OUT }
   );
 
-  animate(
-    sub,
-    { opacity: [0, 1], y: [14, 0] },
-    { delay: 0.5, duration: 0.7, easing: EASE_OUT }
-  );
+  animate(sub, { opacity: [0, 1], y: [14, 0] }, { delay: 0.42, duration: 0.65, easing: EASE_OUT });
 
-  animate(
-    ink,
-    { clipPath: ["inset(0 100% 0 0)", "inset(0 0% 0 0)"] },
-    { delay: stagger(0.26, { start: 0.85 }), duration: 0.5, easing: "ease-out" }
-  );
+  if (ink) writeInk(ink, 0.7);
+}
+
+/* La calligrafia in chiusura si scrive quando la raggiungi: la lettera
+   finisce nel momento in cui finisci di leggerla. */
+function inkOnArrival(selector) {
+  const scope = document.querySelector(selector);
+  if (!scope) return;
+  const ink = prepareInk(scope);
+  if (!ink) return;
+  inView(scope, () => writeInk(ink, 0.1), { amount: 0.6 });
+}
+
+function columnCount(grid) {
+  const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").length;
+  return cols > 0 ? cols : 1;
 }
 
 function buildGallery() {
@@ -79,6 +110,7 @@ function buildGallery() {
   function settle() {
     if (checked === PHOTO_MANIFEST.length && loaded === 0) {
       emptyMsg.hidden = false;
+      inkOnArrival("#galleryEmpty");
     }
   }
 }
@@ -96,15 +128,28 @@ function addPrint(grid, img, src, tilt) {
 
   if (reduceMotion) return;
 
-  /* La stampa si sviluppa: sfocata e slavata, poi a fuoco. */
-  animate(
+  /* Stato iniziale: la stampa non è ancora sviluppata. */
+  print.style.opacity = 0;
+  print.style.filter = "blur(12px) saturate(0.3)";
+  print.style.transform = `rotate(${tilt * 2.2}deg) scale(0.94)`;
+
+  /* Si sviluppa quando entra in viewport, non quando il file finisce di
+     scaricarsi: altrimenti l'animazione va in scena fuori dallo schermo. */
+  inView(
     print,
-    {
-      opacity: [0, 1],
-      filter: ["blur(12px) saturate(0.3)", "blur(0px) saturate(1)"],
-      transform: [`rotate(${tilt * 2.2}deg) scale(0.94)`, `rotate(${tilt}deg) scale(1)`],
+    () => {
+      const col = Array.prototype.indexOf.call(grid.children, print) % columnCount(grid);
+      animate(
+        print,
+        {
+          opacity: [0, 1],
+          filter: ["blur(12px) saturate(0.3)", "blur(0px) saturate(1)"],
+          transform: [`rotate(${tilt * 2.2}deg) scale(0.94)`, `rotate(${tilt}deg) scale(1)`],
+        },
+        { delay: col * 0.07, duration: 0.7, easing: EASE_OUT }
+      );
     },
-    { duration: 0.75, easing: EASE_OUT }
+    { amount: 0.25 }
   );
 
   if (!canHover) return;
@@ -132,9 +177,11 @@ const lightboxImg = document.getElementById("lightboxImg");
 const lightboxClose = document.getElementById("lightboxClose");
 const lightboxPrint = document.querySelector(".lightbox__print");
 let lastFocused = null;
+let closing = false;
 
 function openLightbox(src, trigger) {
   lastFocused = trigger;
+  closing = false;
   lightboxImg.src = src;
   lightboxImg.alt = "Foto da bambino, ingrandita";
   lightbox.classList.add("is-open");
@@ -150,10 +197,31 @@ function openLightbox(src, trigger) {
   );
 }
 
-function closeLightbox() {
+function dismiss() {
   lightbox.classList.remove("is-open");
   lightbox.setAttribute("aria-hidden", "true");
+  lightboxPrint.style.opacity = "";
+  lightboxPrint.style.transform = "";
+  closing = false;
   if (lastFocused) lastFocused.focus();
+}
+
+/* L'uscita è più rapida dell'entrata e accelera: la foto viene riposata,
+   non strappata via. */
+function closeLightbox() {
+  if (closing) return;
+
+  if (reduceMotion) {
+    dismiss();
+    return;
+  }
+
+  closing = true;
+  animate(
+    lightboxPrint,
+    { opacity: [1, 0], transform: ["scale(1) rotate(0deg)", "scale(0.95) rotate(-0.6deg)"] },
+    { duration: 0.19, easing: EASE_IN }
+  ).finished.then(dismiss);
 }
 
 lightboxClose.addEventListener("click", closeLightbox);
@@ -179,3 +247,4 @@ window.addEventListener("keydown", (e) => {
 
 heroArrival();
 buildGallery();
+inkOnArrival(".outro__note");
