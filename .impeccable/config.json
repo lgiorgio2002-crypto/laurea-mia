@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "all-caps-body",
+        "value": "*",
+        "files": [
+          "thesis-easter-egg/index.html"
+        ],
+        "createdAt": "2026-09-18T18:45:42.282Z",
+        "reason": "short uppercase eyebrow label (.stamp), not a body paragraph"
+      },
+      {
+        "rule": "tight-leading",
+        "value": "*",
+        "files": [
+          "thesis-easter-egg/index.html"
+        ],
+        "createdAt": "2026-09-18T18:45:42.495Z",
+        "reason": "intentional tight line-height on large display headline .hero__title, not body text"
+      }
+    ]
+  }
+}
