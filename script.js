@@ -1,89 +1,72 @@
 import { animate, inView, stagger } from "https://cdn.jsdelivr.net/npm/motion@11/+esm";
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-const canHover = window.matchMedia("(hover: hover)").matches;
 
 /* Elenco dei file attesi in ./photos/. Rinomina le tue foto con questi nomi
    (o modifica questa lista) e mettile nella cartella photos/. Se un file non
-   esiste, la stampa viene semplicemente omessa: puoi averne di meno o di più. */
+   esiste, viene semplicemente saltato: puoi averne di meno o di più.
+   La prima, photos/1.jpg, diventa lo scatto d'apertura. */
 const PHOTO_MANIFEST = Array.from({ length: 12 }, (_, i) => `photos/${i + 1}.jpg`);
 
-/* Inclinazioni fisse per foto: stampe appoggiate a mano, non ruotate a caso
-   a ogni render. */
-const TILTS = [-1.6, 1.1, -0.7, 1.5, -1.2, 0.8, -1.4, 1.3, -0.9, 1.6, -1.1, 0.7];
+/* Decelerazione ampia e senza rimbalzo. */
+const EASE_OUT = [0.28, 0, 0.16, 1];
+const EASE_IN = [0.32, 0, 0.9, 1];
 
-/* Decelerazione per gli arrivi. */
-const EASE_OUT = [0.16, 1, 0.3, 1];
-/* Accelerazione per le uscite: parte piano, se ne va decisa. */
-const EASE_IN = [0.3, 0, 1, 1];
-/* Il passo della penna: accelera appena, procede quasi costante, si ferma. */
-const EASE_PEN = [0.4, 0, 0.6, 1];
-
-const INK_HIDDEN = "inset(0 100% 0 0)";
-const INK_WRITTEN = "inset(0 0% 0 0)";
-
-/* La calligrafia si scrive sempre da sola, ovunque compaia: è una regola
-   del mondo della pagina, non un effetto applicato a caso. */
-function prepareInk(scope) {
-  const ink = scope.querySelectorAll(".ink");
-  if (!ink.length || reduceMotion) return null;
-  ink.forEach((el) => {
-    el.style.clipPath = INK_HIDDEN;
-  });
-  return ink;
-}
-
-function writeInk(ink, startDelay = 0) {
-  return animate(
-    ink,
-    { clipPath: [INK_HIDDEN, INK_WRITTEN] },
-    { delay: stagger(0.2, { start: startDelay }), duration: 0.46, easing: EASE_PEN }
-  );
-}
-
-/* Il momento d'autore della pagina: l'arrivo dopo la scansione del QR.
-   Il titolo sale da sotto una maschera, poi la nota si scrive. */
 function heroArrival() {
   if (reduceMotion) return;
 
-  const lines = document.querySelectorAll(".hero__line");
-  const sub = document.querySelector(".hero__sub");
-  const ink = prepareInk(document.querySelector(".hero__note"));
+  const lines = document.querySelectorAll(".hero .reveal-line");
+  const rest = document.querySelectorAll(".hero .subhead, .hero .body, .hero .cta-row");
 
   lines.forEach((el) => {
-    el.style.clipPath = "inset(100% 0 0 0)";
+    el.style.opacity = 0;
   });
-  sub.style.opacity = 0;
+  rest.forEach((el) => {
+    el.style.opacity = 0;
+  });
 
   animate(
     lines,
-    { clipPath: ["inset(100% 0 0 0)", "inset(0% 0 0 0)"], y: [28, 0] },
-    { delay: stagger(0.12), duration: 0.8, easing: EASE_OUT }
+    { opacity: [0, 1], transform: ["scale(1.06) translateY(16px)", "scale(1) translateY(0px)"] },
+    { delay: stagger(0.12), duration: 0.85, easing: EASE_OUT }
   );
 
-  animate(sub, { opacity: [0, 1], y: [14, 0] }, { delay: 0.42, duration: 0.65, easing: EASE_OUT });
-
-  if (ink) writeInk(ink, 0.7);
+  animate(
+    rest,
+    { opacity: [0, 1], transform: ["translateY(18px)", "translateY(0px)"] },
+    { delay: stagger(0.09, { start: 0.42 }), duration: 0.7, easing: EASE_OUT }
+  );
 }
 
-/* La calligrafia in chiusura si scrive quando la raggiungi: la lettera
-   finisce nel momento in cui finisci di leggerla. */
-function inkOnArrival(selector) {
-  const scope = document.querySelector(selector);
-  if (!scope) return;
-  const ink = prepareInk(scope);
-  if (!ink) return;
-  inView(scope, () => writeInk(ink, 0.1), { amount: 0.6 });
-}
+/* Ogni riquadro entra scorrendo: è la firma di questa impaginazione. */
+function revealTiles() {
+  if (reduceMotion) return;
 
-function columnCount(grid) {
-  const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").length;
-  return cols > 0 ? cols : 1;
+  const groups = document.querySelectorAll(
+    "#canzone .tile__head, #canzone .embed, #foto .tile__head, .outro .tile__head"
+  );
+
+  groups.forEach((el) => {
+    el.style.opacity = 0;
+  });
+
+  inView(
+    groups,
+    (info) => {
+      animate(
+        info.target,
+        { opacity: [0, 1], transform: ["translateY(24px)", "translateY(0px)"] },
+        { duration: 0.75, easing: EASE_OUT }
+      );
+    },
+    { amount: 0.3 }
+  );
 }
 
 function buildGallery() {
-  const grid = document.getElementById("galleryGrid");
-  const emptyMsg = document.getElementById("galleryEmpty");
+  const strip = document.getElementById("strip");
+  const heroShot = document.getElementById("heroShot");
+  const emptyMsg = document.getElementById("empty");
 
   let loaded = 0;
   let checked = 0;
@@ -97,7 +80,11 @@ function buildGallery() {
     img.onload = () => {
       loaded += 1;
       checked += 1;
-      addPrint(grid, img, src, TILTS[i % TILTS.length]);
+      if (i === 0) {
+        mountHeroShot(heroShot, img, src);
+      } else {
+        addShot(strip, img, src);
+      }
       settle();
     };
 
@@ -108,74 +95,69 @@ function buildGallery() {
   });
 
   function settle() {
-    if (checked === PHOTO_MANIFEST.length && loaded === 0) {
-      emptyMsg.hidden = false;
-      inkOnArrival("#galleryEmpty");
-    }
+    if (checked !== PHOTO_MANIFEST.length) return;
+    if (loaded === 0) emptyMsg.hidden = false;
+    /* Se esiste solo la prima foto, è già in apertura: la striscia resta
+       vuota e lo diciamo. */
+    if (loaded === 1 && !strip.children.length) emptyMsg.hidden = false;
   }
 }
 
-function addPrint(grid, img, src, tilt) {
-  const print = document.createElement("button");
-  print.className = "gallery__item";
-  print.type = "button";
-  print.setAttribute("aria-label", "Apri la foto a schermo intero");
-  print.style.transform = `rotate(${tilt}deg)`;
-  print.appendChild(img);
-  grid.appendChild(print);
+function mountHeroShot(container, img, src) {
+  const button = document.createElement("button");
+  button.className = "shot-open";
+  button.type = "button";
+  button.setAttribute("aria-label", "Apri la foto a schermo intero");
+  button.style.cssText = "display:block;width:100%;padding:0;border:0;background:none;cursor:pointer";
+  button.appendChild(img);
+  container.appendChild(button);
+  container.hidden = false;
 
-  print.addEventListener("click", () => openLightbox(src, print));
+  button.addEventListener("click", () => openLightbox(src, button));
 
   if (reduceMotion) return;
 
-  /* Stato iniziale: la stampa non è ancora sviluppata. */
-  print.style.opacity = 0;
-  print.style.filter = "blur(12px) saturate(0.3)";
-  print.style.transform = `rotate(${tilt * 2.2}deg) scale(0.94)`;
+  container.style.opacity = 0;
+  animate(
+    container,
+    { opacity: [0, 1], transform: ["scale(1.04)", "scale(1)"] },
+    { delay: 0.75, duration: 1, easing: EASE_OUT }
+  );
+}
 
-  /* Si sviluppa quando entra in viewport, non quando il file finisce di
-     scaricarsi: altrimenti l'animazione va in scena fuori dallo schermo. */
+function addShot(strip, img, src) {
+  const shot = document.createElement("button");
+  shot.className = "shot";
+  shot.type = "button";
+  shot.setAttribute("aria-label", "Apri la foto a schermo intero");
+  shot.appendChild(img);
+  strip.appendChild(shot);
+
+  shot.addEventListener("click", () => openLightbox(src, shot));
+
+  if (reduceMotion) return;
+
+  shot.style.opacity = 0;
+
+  /* Entra quando la raggiungi, non quando il file finisce di scaricarsi. */
   inView(
-    print,
+    shot,
     () => {
-      const col = Array.prototype.indexOf.call(grid.children, print) % columnCount(grid);
+      const index = Array.prototype.indexOf.call(strip.children, shot);
       animate(
-        print,
-        {
-          opacity: [0, 1],
-          filter: ["blur(12px) saturate(0.3)", "blur(0px) saturate(1)"],
-          transform: [`rotate(${tilt * 2.2}deg) scale(0.94)`, `rotate(${tilt}deg) scale(1)`],
-        },
-        { delay: col * 0.07, duration: 0.7, easing: EASE_OUT }
+        shot,
+        { opacity: [0, 1], transform: ["translateY(20px)", "translateY(0px)"] },
+        { delay: Math.min(index, 3) * 0.08, duration: 0.7, easing: EASE_OUT }
       );
     },
-    { amount: 0.25 }
+    { amount: 0.2 }
   );
-
-  if (!canHover) return;
-
-  print.addEventListener("pointerenter", () => {
-    animate(
-      print,
-      { transform: `rotate(${tilt * 0.25}deg) scale(1.045) translateY(-4px)` },
-      { type: "spring", stiffness: 260, damping: 20 }
-    );
-  });
-
-  print.addEventListener("pointerleave", () => {
-    animate(
-      print,
-      { transform: `rotate(${tilt}deg) scale(1) translateY(0px)` },
-      { type: "spring", stiffness: 260, damping: 22 }
-    );
-  });
 }
 
 /* Lightbox */
 const lightbox = document.getElementById("lightbox");
 const lightboxImg = document.getElementById("lightboxImg");
 const lightboxClose = document.getElementById("lightboxClose");
-const lightboxPrint = document.querySelector(".lightbox__print");
 let lastFocused = null;
 let closing = false;
 
@@ -191,23 +173,21 @@ function openLightbox(src, trigger) {
   if (reduceMotion) return;
 
   animate(
-    lightboxPrint,
-    { opacity: [0, 1], transform: ["scale(0.92) rotate(-1deg)", "scale(1) rotate(0deg)"] },
-    { type: "spring", stiffness: 210, damping: 24 }
+    lightboxImg,
+    { opacity: [0, 1], transform: ["scale(0.94)", "scale(1)"] },
+    { duration: 0.42, easing: EASE_OUT }
   );
 }
 
 function dismiss() {
   lightbox.classList.remove("is-open");
   lightbox.setAttribute("aria-hidden", "true");
-  lightboxPrint.style.opacity = "";
-  lightboxPrint.style.transform = "";
+  lightboxImg.style.opacity = "";
+  lightboxImg.style.transform = "";
   closing = false;
   if (lastFocused) lastFocused.focus();
 }
 
-/* L'uscita è più rapida dell'entrata e accelera: la foto viene riposata,
-   non strappata via. */
 function closeLightbox() {
   if (closing) return;
 
@@ -218,9 +198,9 @@ function closeLightbox() {
 
   closing = true;
   animate(
-    lightboxPrint,
-    { opacity: [1, 0], transform: ["scale(1) rotate(0deg)", "scale(0.95) rotate(-0.6deg)"] },
-    { duration: 0.19, easing: EASE_IN }
+    lightboxImg,
+    { opacity: [1, 0], transform: ["scale(1)", "scale(0.97)"] },
+    { duration: 0.2, easing: EASE_IN }
   ).finished.then(dismiss);
 }
 
@@ -246,5 +226,5 @@ window.addEventListener("keydown", (e) => {
 });
 
 heroArrival();
+revealTiles();
 buildGallery();
-inkOnArrival(".outro__note");
