@@ -68,6 +68,8 @@ body {
   letter-spacing: -0.022em;
   margin: 0 0 14px;
   text-wrap: balance;
+  /* Riserva per le discendenti: la maschera di rivelazione taglia il box. */
+  padding-bottom: 0.08em;
 }
 
 .headline--hero {
@@ -156,6 +158,16 @@ body {
 .hero__shot {
   margin: 56px auto 0;
   max-width: 1120px;
+}
+
+.shot-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  will-change: transform;
 }
 
 .hero__shot img {

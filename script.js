@@ -1,4 +1,4 @@
-import { animate, inView, stagger } from "https://cdn.jsdelivr.net/npm/motion@11/+esm";
+import { animate, inView, scroll, stagger } from "https://cdn.jsdelivr.net/npm/motion@11/+esm";
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -8,9 +8,12 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").match
    La prima, photos/1.jpg, diventa lo scatto d'apertura. */
 const PHOTO_MANIFEST = Array.from({ length: 12 }, (_, i) => `photos/${i + 1}.jpg`);
 
-/* Decelerazione ampia e senza rimbalzo. */
+/* Decelerazione lunga, nessun rimbalzo: il registro è quello. */
 const EASE_OUT = [0.28, 0, 0.16, 1];
 const EASE_IN = [0.32, 0, 0.9, 1];
+
+const MASK_HIDDEN = "inset(100% 0 0 0)";
+const MASK_SHOWN = "inset(0% 0 0 0)";
 
 function heroArrival() {
   if (reduceMotion) return;
@@ -38,28 +41,64 @@ function heroArrival() {
   );
 }
 
-/* Ogni riquadro entra scorrendo: è la firma di questa impaginazione. */
+/* Titolo che sale da sotto una maschera, poi il testo di supporto.
+   Il ritmo è sempre lo stesso, come nei riquadri di un keynote. */
 function revealTiles() {
   if (reduceMotion) return;
 
-  const groups = document.querySelectorAll(
-    "#canzone .tile__head, #canzone .embed, #foto .tile__head, .outro .tile__head"
-  );
+  const heads = document.querySelectorAll("#canzone .tile__head, #foto .tile__head, .outro .tile__head");
 
-  groups.forEach((el) => {
-    el.style.opacity = 0;
+  heads.forEach((head) => {
+    const headline = head.querySelector(".headline");
+    const support = head.querySelectorAll(".subhead, .body, .sign");
+
+    headline.style.clipPath = MASK_HIDDEN;
+    headline.style.opacity = 0;
+    support.forEach((el) => {
+      el.style.opacity = 0;
+    });
+
+    inView(
+      head,
+      () => {
+        animate(
+          headline,
+          {
+            clipPath: [MASK_HIDDEN, MASK_SHOWN],
+            opacity: [0, 1],
+            transform: ["translateY(22px)", "translateY(0px)"],
+          },
+          { duration: 0.9, easing: EASE_OUT }
+        );
+
+        animate(
+          support,
+          { opacity: [0, 1], transform: ["translateY(16px)", "translateY(0px)"] },
+          { delay: stagger(0.08, { start: 0.22 }), duration: 0.7, easing: EASE_OUT }
+        );
+      },
+      { amount: 0.3 }
+    );
   });
+}
+
+/* Il player entra come un oggetto appoggiato sul riquadro chiaro. */
+function revealEmbed() {
+  if (reduceMotion) return;
+
+  const embed = document.querySelector(".embed");
+  embed.style.opacity = 0;
 
   inView(
-    groups,
-    (info) => {
+    embed,
+    () => {
       animate(
-        info.target,
-        { opacity: [0, 1], transform: ["translateY(24px)", "translateY(0px)"] },
-        { duration: 0.75, easing: EASE_OUT }
+        embed,
+        { opacity: [0, 1], transform: ["translateY(28px) scale(0.98)", "translateY(0px) scale(1)"] },
+        { duration: 0.85, easing: EASE_OUT }
       );
     },
-    { amount: 0.3 }
+    { amount: 0.25 }
   );
 }
 
@@ -97,8 +136,6 @@ function buildGallery() {
   function settle() {
     if (checked !== PHOTO_MANIFEST.length) return;
     if (loaded === 0) emptyMsg.hidden = false;
-    /* Se esiste solo la prima foto, è già in apertura: la striscia resta
-       vuota e lo diciamo. */
     if (loaded === 1 && !strip.children.length) emptyMsg.hidden = false;
   }
 }
@@ -108,7 +145,6 @@ function mountHeroShot(container, img, src) {
   button.className = "shot-open";
   button.type = "button";
   button.setAttribute("aria-label", "Apri la foto a schermo intero");
-  button.style.cssText = "display:block;width:100%;padding:0;border:0;background:none;cursor:pointer";
   button.appendChild(img);
   container.appendChild(button);
   container.hidden = false;
@@ -117,11 +153,25 @@ function mountHeroShot(container, img, src) {
 
   if (reduceMotion) return;
 
+  /* L'opacità sta sul contenitore, la trasformazione sull'elemento interno:
+     così l'entrata e il movimento legato allo scroll non si contendono la
+     stessa proprietà. */
   container.style.opacity = 0;
-  animate(
-    container,
-    { opacity: [0, 1], transform: ["scale(1.04)", "scale(1)"] },
-    { delay: 0.75, duration: 1, easing: EASE_OUT }
+  animate(container, { opacity: [0, 1] }, { delay: 0.7, duration: 0.9, easing: EASE_OUT });
+
+  heroScrub(button);
+}
+
+/* La firma di Apple: lo scatto non "entra", si muove insieme allo scroll.
+   Parte leggermente più grande e sale più lentamente della pagina. */
+function heroScrub(target) {
+  scroll(
+    (progress) => {
+      const scale = 1.06 - 0.06 * Math.min(progress * 1.8, 1);
+      const shift = -34 * progress;
+      target.style.transform = `translate3d(0, ${shift}px, 0) scale(${scale})`;
+    },
+    { target, offset: ["start end", "end start"] }
   );
 }
 
@@ -139,7 +189,6 @@ function addShot(strip, img, src) {
 
   shot.style.opacity = 0;
 
-  /* Entra quando la raggiungi, non quando il file finisce di scaricarsi. */
   inView(
     shot,
     () => {
@@ -154,34 +203,61 @@ function addShot(strip, img, src) {
   );
 }
 
-/* Lightbox */
+/* Lightbox con zoom dal punto di partenza: la foto si espande dalla
+   miniatura che hai toccato e ci ritorna, come in Foto su iOS. */
 const lightbox = document.getElementById("lightbox");
 const lightboxImg = document.getElementById("lightboxImg");
 const lightboxClose = document.getElementById("lightboxClose");
 let lastFocused = null;
 let closing = false;
 
+function flipFrom(sourceEl) {
+  const sourceImg = sourceEl.querySelector("img");
+  if (!sourceImg) return null;
+
+  const from = sourceImg.getBoundingClientRect();
+  const to = lightboxImg.getBoundingClientRect();
+  if (!to.width || !to.height || !from.width) return null;
+
+  const scale = from.width / to.width;
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+
+  return `translate(${dx}px, ${dy}px) scale(${scale})`;
+}
+
 function openLightbox(src, trigger) {
   lastFocused = trigger;
   closing = false;
   lightboxImg.src = src;
-  lightboxImg.alt = "Foto da bambino, ingrandita";
   lightbox.classList.add("is-open");
   lightbox.setAttribute("aria-hidden", "false");
+  lightboxImg.alt = "Foto da bambino, ingrandita";
   lightboxClose.focus();
 
   if (reduceMotion) return;
 
-  animate(
-    lightboxImg,
-    { opacity: [0, 1], transform: ["scale(0.94)", "scale(1)"] },
-    { duration: 0.42, easing: EASE_OUT }
-  );
+  requestAnimationFrame(() => {
+    const start = flipFrom(trigger);
+    animate(
+      lightbox,
+      { opacity: [0, 1] },
+      { duration: 0.28, easing: EASE_OUT }
+    );
+    animate(
+      lightboxImg,
+      start
+        ? { transform: [start, "translate(0px, 0px) scale(1)"] }
+        : { opacity: [0, 1], transform: ["scale(0.94)", "scale(1)"] },
+      { duration: 0.55, easing: EASE_OUT }
+    );
+  });
 }
 
 function dismiss() {
   lightbox.classList.remove("is-open");
   lightbox.setAttribute("aria-hidden", "true");
+  lightbox.style.opacity = "";
   lightboxImg.style.opacity = "";
   lightboxImg.style.transform = "";
   closing = false;
@@ -197,10 +273,16 @@ function closeLightbox() {
   }
 
   closing = true;
+  const end = lastFocused ? flipFrom(lastFocused) : null;
+
+  animate(lightbox, { opacity: [1, 0] }, { duration: 0.34, easing: EASE_IN });
+
   animate(
     lightboxImg,
-    { opacity: [1, 0], transform: ["scale(1)", "scale(0.97)"] },
-    { duration: 0.2, easing: EASE_IN }
+    end
+      ? { transform: ["translate(0px, 0px) scale(1)", end] }
+      : { opacity: [1, 0], transform: ["scale(1)", "scale(0.97)"] },
+    { duration: 0.34, easing: EASE_IN }
   ).finished.then(dismiss);
 }
 
@@ -227,4 +309,5 @@ window.addEventListener("keydown", (e) => {
 
 heroArrival();
 revealTiles();
+revealEmbed();
 buildGallery();
