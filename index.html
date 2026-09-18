@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ce l'ho fatta</title>
+<meta name="description" content="Un piccolo easter egg per festeggiare la fine della tesi.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%8E%93</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,600&family=Work+Sans:wght@400;500;600&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main>
+
+  <section class="hero" data-reveal="hero">
+    <p class="stamp">ottobre 2026 &middot; laurea magistrale</p>
+    <h1 class="hero__title">
+      Fine.<br>
+      <em>Ce l'ho fatta.</em>
+    </h1>
+    <p class="hero__sub">Anche nei giorni in cui ero sicuro di non farcela, in qualche modo sono arrivato qui. Due master, due paesi, una quantit&agrave; imbarazzante di caff&egrave;.</p>
+    <p class="hero__note">se stai leggendo questo, hai scansionato l'ultima pagina della mia tesi. ciao.</p>
+  </section>
+
+  <section class="music" data-reveal>
+    <h2 class="section__title">La canzone di questi anni</h2>
+    <p class="section__lede">Parla di sindrome dell'impostore e di smettere di dubitare di s&eacute;. L'ho ascoltata in loop scrivendo l'ultimo capitolo, alle tre di notte, quando ero sicuro che non ce l'avrei fatta.</p>
+    <div class="music__frame">
+      <iframe data-testid="embed-iframe" style="border-radius:12px" src="https://open.spotify.com/embed/track/6DhMZVuD6TH0jd4bMNChCU?utm_source=generator" width="100%" height="352" frameBorder="0" allowfullscreen="" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe>
+    </div>
+  </section>
+
+  <section class="gallery" data-reveal>
+    <h2 class="section__title">Da dove &egrave; partito tutto</h2>
+    <p class="section__lede">Prima delle slide, delle citazioni APA e del panico da consegna, c'era questo.</p>
+    <div class="gallery__grid" id="galleryGrid" aria-label="Galleria di foto da bambino"></div>
+    <p class="gallery__empty" id="galleryEmpty" hidden>le foto arrivano a breve, promesso.</p>
+  </section>
+
+  <footer class="outro" data-reveal>
+    <p class="outro__note">grazie per essere arrivato fin qui, letteralmente e su questa pagina</p>
+    <p class="outro__sign">L.G.</p>
+  </footer>
+
+</main>
+
+<div class="lightbox" id="lightbox" aria-hidden="true">
+  <button class="lightbox__close" id="lightboxClose" aria-label="Chiudi">&times;</button>
+  <img class="lightbox__img" id="lightboxImg" alt="">
+</div>
+
+<script type="module" src="script.js"></script>
+</body>
+</html>
