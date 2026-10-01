@@ -307,6 +307,57 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+/* "Ascolta" fa partire davvero il brano. L'iframe resta quello originale:
+   lo si comanda dall'esterno con i messaggi che il player Spotify accetta.
+   Il clic è un gesto dell'utente, quindi il browser concede l'audio. */
+const SPOTIFY_ORIGIN = "https://open.spotify.com";
+const player = document.querySelector('iframe[data-testid="embed-iframe"]');
+
+/* Stato del player, letto dai messaggi che manda lui stesso.
+   heardAt: ultimo messaggio ricevuto, per capire se un comando è arrivato. */
+const song = { playing: false, starting: false, heardAt: 0 };
+
+window.addEventListener("message", (e) => {
+  if (e.origin !== SPOTIFY_ORIGIN || !e.data) return;
+  const { type, payload } = e.data;
+  if (type !== "playback_started" && type !== "playback_update") return;
+
+  song.heardAt = performance.now();
+  if (type === "playback_started") song.playing = true;
+  if (type === "playback_update") {
+    song.playing = !payload.isPaused && payload.position < payload.duration;
+  }
+});
+
+function sendToPlayer(command) {
+  player.contentWindow?.postMessage({ command }, SPOTIFY_ORIGIN);
+}
+
+/* Quando il brano non suona, "toggle" equivale a play in ogni caso: player
+   mai usato, in pausa, o con l'anteprima finita (lì Spotify scarica il brano
+   e "resume" verrebbe rifiutato). Siccome però su un brano che suona
+   "toggle" mette in pausa, si riprova solo se il player non ha risposto per
+   nulla (iframe in lazy loading non ancora pronto) e si ignorano i clic
+   mentre un avvio è in corso: un doppio tocco non lo spegne. */
+function playSong() {
+  if (song.playing || song.starting) return;
+  song.starting = true;
+
+  let attempts = 0;
+  const tryStart = () => {
+    attempts += 1;
+    const sentAt = performance.now();
+    sendToPlayer("toggle");
+    setTimeout(() => {
+      if (song.heardAt < sentAt && attempts < 7) tryStart();
+      else song.starting = false;
+    }, 1200);
+  };
+  tryStart();
+}
+
+document.querySelector(".pill--fill").addEventListener("click", playSong);
+
 heroArrival();
 revealTiles();
 revealEmbed();
