@@ -46,7 +46,7 @@ function heroArrival() {
 function revealTiles() {
   if (reduceMotion) return;
 
-  const heads = document.querySelectorAll("#canzone .tile__head, #foto .tile__head, .outro .tile__head");
+  const heads = document.querySelectorAll(".outro .tile__head");
 
   heads.forEach((head) => {
     const headline = head.querySelector(".headline");
@@ -105,10 +105,6 @@ function revealEmbed() {
 function buildGallery() {
   const strip = document.getElementById("strip");
   const heroShot = document.getElementById("heroShot");
-  const emptyMsg = document.getElementById("empty");
-
-  let loaded = 0;
-  let checked = 0;
 
   PHOTO_MANIFEST.forEach((src, i) => {
     const img = new Image();
@@ -117,27 +113,13 @@ function buildGallery() {
     img.decoding = "async";
 
     img.onload = () => {
-      loaded += 1;
-      checked += 1;
       if (i === 0) {
         mountHeroShot(heroShot, img, src);
       } else {
         addShot(strip, img, src);
       }
-      settle();
-    };
-
-    img.onerror = () => {
-      checked += 1;
-      settle();
     };
   });
-
-  function settle() {
-    if (checked !== PHOTO_MANIFEST.length) return;
-    if (loaded === 0) emptyMsg.hidden = false;
-    if (loaded === 1 && !strip.children.length) emptyMsg.hidden = false;
-  }
 }
 
 function mountHeroShot(container, img, src) {
