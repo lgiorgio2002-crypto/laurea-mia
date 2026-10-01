@@ -111,18 +111,18 @@ body {
   color: var(--ink-soft);
 }
 
-/* Pill CTA. Portano davvero da qualche parte: sono i due salti della pagina. */
+/* Un solo comando: fa partire la canzone e porta alle foto. */
 .cta-row {
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: 14px;
   margin-top: 30px;
 }
 
 .pill {
-  display: inline-block;
-  padding: 12px 23px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 26px 12px 22px;
   border-radius: 980px;
   font-size: 1.0625rem;
   line-height: 1.2;
@@ -141,13 +141,8 @@ body {
   background: #47a9ff;
 }
 
-.pill--ghost {
-  border: 1px solid var(--blue-dark-bg);
-  color: var(--blue-dark-bg);
-}
-
-.pill--ghost:hover {
-  background: rgba(41, 151, 255, 0.12);
+.pill__icon {
+  flex: none;
 }
 
 .pill:active {

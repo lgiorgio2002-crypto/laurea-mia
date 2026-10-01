@@ -307,7 +307,8 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-/* "Ascolta" fa partire davvero il brano. L'iframe resta quello originale:
+/* "Play" fa partire il brano mentre il link porta alle foto: la canzone fa
+   da colonna sonora mentre le sfogli. L'iframe resta quello originale:
    lo si comanda dall'esterno con i messaggi che il player Spotify accetta.
    Il clic è un gesto dell'utente, quindi il browser concede l'audio. */
 const SPOTIFY_ORIGIN = "https://open.spotify.com";
