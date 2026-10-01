@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const LaureaCrypto = require("./laurea-crypto.js");
 
-const SITE_URL = "https://lgiorgio2002-crypto.github.io/laurea/";
+const SITE_URL = "https://lgiorgio2002-crypto.github.io/laurea-mia/";
 const keyFile = path.join(__dirname, "secret.key");
 const srcDir = path.join(__dirname, "private", "photos");
 const outDir = path.join(__dirname, "photos");
