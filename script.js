@@ -2,11 +2,10 @@ import { animate, inView, scroll, stagger } from "https://cdn.jsdelivr.net/npm/m
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/* Elenco dei file attesi in ./photos/. Rinomina le tue foto con questi nomi
-   (o modifica questa lista) e mettile nella cartella photos/. Se un file non
-   esiste, viene semplicemente saltato: puoi averne di meno o di più.
-   La prima, photos/1.jpg, diventa lo scatto d'apertura. */
-const PHOTO_MANIFEST = Array.from({ length: 12 }, (_, i) => `photos/${i + 1}.jpg`);
+/* Le foto online sono cifrate (photos/N.bin, generati da build.js). La chiave
+   arriva dal QR, dopo il "#", e non lascia mai il browser. Senza chiave la
+   pagina funziona lo stesso, solo senza foto. */
+const KEY_STORE = "laurea-key";
 
 /* Decelerazione lunga, nessun rimbalzo: il registro è quello. */
 const EASE_OUT = [0.28, 0, 0.16, 1];
@@ -102,23 +101,87 @@ function revealEmbed() {
   );
 }
 
-function buildGallery() {
+/* Prende la chiave dal frammento dell'URL e la toglie dalla barra degli
+   indirizzi, così chi condivide il link non condivide la chiave. La copia in
+   sessionStorage fa sopravvivere un ricaricamento della scheda. Un frammento
+   che non è una chiave (per esempio "#foto" lasciato dal pulsante Play) non
+   viene toccato. */
+function takeKey() {
+  const fromHash = window.LaureaCrypto.fromB64url(location.hash.slice(1));
+  if (fromHash) {
+    try {
+      sessionStorage.setItem(KEY_STORE, location.hash.slice(1));
+    } catch {}
+    history.replaceState(null, "", location.pathname + location.search);
+    return fromHash;
+  }
+  try {
+    return window.LaureaCrypto.fromB64url(sessionStorage.getItem(KEY_STORE) || "");
+  } catch {
+    return null;
+  }
+}
+
+async function decryptPhoto(key, n) {
+  try {
+    const res = await fetch(`photos/${n}.bin`);
+    if (!res.ok) return null;
+    const plain = await window.LaureaCrypto.open(key, new Uint8Array(await res.arrayBuffer()));
+    return plain ? URL.createObjectURL(new Blob([plain], { type: "image/jpeg" })) : null;
+  } catch {
+    return null;
+  }
+}
+
+/* Il riquadro foto parte nascosto e compare alla prima foto decifrata: senza
+   chiave, o con una chiave sbagliata, nessuno vede un riquadro vuoto. */
+function revealPhotoSection() {
+  const section = document.getElementById("foto");
+  if (!section.hidden) return;
+  section.hidden = false;
+  const play = document.querySelector(".pill--fill");
+  play.setAttribute("href", "#foto");
+  play.setAttribute("aria-label", "Play: fa partire la canzone e ti porta alle foto");
+}
+
+async function buildGallery() {
+  const raw = takeKey();
+  if (!raw) return;
+
+  let key;
+  let numbers;
+  try {
+    key = await window.LaureaCrypto.importKey(raw);
+    numbers = (await (await fetch("photos/manifest.json")).json()).photos;
+  } catch {
+    return;
+  }
+
   const strip = document.getElementById("strip");
   const heroShot = document.getElementById("heroShot");
 
-  PHOTO_MANIFEST.forEach((src, i) => {
+  numbers.forEach((n, i) => {
     const img = new Image();
-    img.src = src;
-    img.alt = "Foto da bambino";
+    img.alt = `Foto ${n}`;
     img.decoding = "async";
 
-    img.onload = () => {
-      if (i === 0) {
-        mountHeroShot(heroShot, img, src);
-      } else {
-        addShot(strip, img, src);
+    /* Le stampe entrano nella striscia subito, nell'ordine dei numeri, e si
+       riempiono quando la foto è decifrata. Aspettando, l'ordine sarebbe
+       quello in cui la rete consegna i file. */
+    const shot = i === 0 ? null : addShot(strip, img);
+
+    decryptPhoto(key, n).then((url) => {
+      if (!url) {
+        if (shot) shot.remove();
+        return;
       }
-    };
+      if (shot) {
+        revealPhotoSection();
+      } else {
+        img.onload = () => mountHeroShot(heroShot, img, url);
+      }
+      img.src = url;
+    });
   });
 }
 
@@ -126,7 +189,7 @@ function mountHeroShot(container, img, src) {
   const button = document.createElement("button");
   button.className = "shot-open";
   button.type = "button";
-  button.setAttribute("aria-label", "Apri la foto a schermo intero");
+  button.setAttribute("aria-label", `Apri a schermo intero: ${img.alt}`);
   button.appendChild(img);
   container.appendChild(button);
   container.hidden = false;
@@ -157,17 +220,20 @@ function heroScrub(target) {
   );
 }
 
-function addShot(strip, img, src) {
+function addShot(strip, img) {
   const shot = document.createElement("button");
   shot.className = "shot";
   shot.type = "button";
-  shot.setAttribute("aria-label", "Apri la foto a schermo intero");
+  shot.setAttribute("aria-label", `Apri a schermo intero: ${img.alt}`);
   shot.appendChild(img);
   strip.appendChild(shot);
 
-  shot.addEventListener("click", () => openLightbox(src, shot));
+  /* La foto viene decifrata dopo: si legge img.src al momento del tocco. */
+  shot.addEventListener("click", () => {
+    if (img.src) openLightbox(img.src, shot);
+  });
 
-  if (reduceMotion) return;
+  if (reduceMotion) return shot;
 
   shot.style.opacity = 0;
 
@@ -183,6 +249,8 @@ function addShot(strip, img, src) {
     },
     { amount: 0.2 }
   );
+
+  return shot;
 }
 
 /* Lightbox con zoom dal punto di partenza: la foto si espande dalla
@@ -214,7 +282,7 @@ function openLightbox(src, trigger) {
   lightboxImg.src = src;
   lightbox.classList.add("is-open");
   lightbox.setAttribute("aria-hidden", "false");
-  lightboxImg.alt = "Foto da bambino, ingrandita";
+  lightboxImg.alt = `${trigger.querySelector("img")?.alt ?? "Foto"}, ingrandita`;
   lightboxClose.focus();
 
   if (reduceMotion) return;

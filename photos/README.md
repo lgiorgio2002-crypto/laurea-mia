@@ -1,31 +1,22 @@
 # Foto
 
-Metti qui le tue foto da bambino con questi nomi esatti:
+Questa cartella è pubblica, quindi contiene solo foto **cifrate** (`N.bin`)
+e l'elenco `manifest.json`. Senza la chiave del QR sono illeggibili.
 
-```
-1.jpg
-2.jpg
-3.jpg
-...
-12.jpg
-```
+Gli originali stanno in `private/photos/` (`1.jpeg`, `2.jpeg`, ...), che git
+ignora e che non deve mai essere pubblicata.
 
-**`1.jpg` ha un ruolo speciale**: diventa lo scatto grande di apertura,
-subito sotto il titolo. Sceglila di conseguenza e possibilmente orizzontale,
-perche' occupa tutta la larghezza. Tutte le altre finiscono nella striscia
-scorrevole della sezione "Da dove e' partito tutto".
+## Aggiungere, togliere o riordinare foto
 
-Puoi usarne meno di 12 (i file mancanti vengono semplicemente saltati)
-o di piu': in quel caso apri `script.js` e cambia il numero `12` nella riga
+1. Modifica i file in `private/photos/`. Il numero è l'ordine; `1.jpeg` è lo
+   scatto grande di apertura. L'estensione deve essere `.jpeg`, minuscola.
+2. Esegui `node build.js` dalla cartella del progetto: rigenera i `.bin` e
+   l'elenco, e toglie quelli delle foto cancellate.
+3. Commit e push della cartella `photos/`.
 
-```js
-const PHOTO_MANIFEST = Array.from({ length: 12 }, (_, i) => `photos/${i + 1}.jpg`);
-```
+## La chiave
 
-Formato consigliato: `.jpg`. Le foto della striscia vengono ritagliate
-automaticamente in verticale (4:5), qualunque sia la proporzione di partenza,
-quindi non serve editarle a mano.
-
-Nota sulla qualita': in questo stile le foto vengono mostrate grandi, quindi
-le scansioni molto a bassa risoluzione si vedono. Se hai gli originali,
-scansionali ad almeno 1500px sul lato lungo.
+Sta in `secret.key` (anche questo ignorato da git). **Non deve mai cambiare**
+dopo la stampa del QR, altrimenti il QR della tesi non apre più le foto.
+Se il file va perso, la chiave si recupera scansionando il QR stampato: è la
+parte dell'indirizzo dopo il `#`.

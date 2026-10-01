@@ -165,10 +165,14 @@ body {
   will-change: transform;
 }
 
+/* Qualunque proporzione abbia la prima foto, resta dentro lo schermo. */
 .hero__shot img {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
+  max-height: min(78vh, 720px);
   display: block;
+  margin: 0 auto;
   border-radius: var(--radius-card);
 }
 
