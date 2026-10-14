@@ -7,7 +7,422 @@
 <meta name="description" content="Un piccolo easter egg per festeggiare la fine della tesi.">
 <meta name="theme-color" content="#ffd43b">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23ffd43b%22/><circle cx=%2216%22 cy=%2216%22 r=%229%22 fill=%22%23fff8e1%22 stroke=%22%232b2622%22 stroke-width=%222.5%22/></svg>">
-<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "motion": "https://cdn.jsdelivr.net/npm/motion@11/+esm",
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+:root {
+  --sun: #ffd43b;
+  --sun-glow: #ffe98a;
+  --cream: #fff8e1;
+  --ink: #2b2622;
+  --asphalt: #3a342f;
+  --road-h: clamp(110px, 22vh, 190px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Diversi elementi hanno un display proprio (flex, grid) che altrimenti
+   scavalcherebbe l'attributo hidden. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--sun);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--sun);
+}
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 5px;
+  border-radius: 10px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Apertura: il sole, la strada, il pulmino parcheggiato. */
+.scene {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.sun {
+  position: absolute;
+  top: 9dvh;
+  right: -12vmin;
+  width: 64vmin;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--cream) 0 38%, var(--sun-glow) 39% 62%, rgba(255, 233, 138, 0) 63%);
+}
+
+.road {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--road-h);
+  background: var(--asphalt);
+  border-top: 6px solid var(--ink);
+}
+
+/* Linea tratteggiata di mezzeria. */
+.road::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 52%;
+  height: 6px;
+  background: repeating-linear-gradient(90deg, var(--cream) 0 38px, transparent 38px 76px);
+  opacity: 0.9;
+}
+
+.lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--road-h) * 0.6);
+  display: flex;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.bus {
+  width: min(84vw, 540px);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bus__art {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.bus__shadow {
+  fill: var(--ink);
+  opacity: 0.22;
+}
+
+.wheel,
+.bus__body {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Gli sbuffi di scarico sono figli della scena, non del pulmino. */
+.puff {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--cream);
+  border: 3px solid var(--ink);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Il viaggio: le foto, e sotto la strada che il pulmino percorre. */
+.trip {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 64px 0 56px;
+  position: relative;
+  overflow: hidden;
+}
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 22px;
+  padding: 26px 22px 30px;
+  scrollbar-width: none;
+}
+
+.strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Ogni stampa ha la forma della sua foto: niente ritagli, nessuna faccia
+   tagliata sul bordo. */
+.shot {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+  padding: 9px 9px 34px;
+  border: 3px solid var(--ink);
+  border-radius: 4px;
+  background: var(--cream);
+  box-shadow: 0 14px 22px -14px rgba(43, 38, 34, 0.55);
+  cursor: pointer;
+  touch-action: manipulation;
+  will-change: transform;
+  transition: box-shadow 0.18s ease;
+}
+
+.shot:active {
+  box-shadow: 0 5px 10px -8px rgba(43, 38, 34, 0.7);
+}
+
+.shot img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 76vw;
+  max-height: min(56vh, 460px);
+}
+
+.route {
+  position: relative;
+  height: 86px;
+  margin: 18px 22px 0;
+}
+
+.route__road {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30px;
+  border-radius: 15px;
+  background: var(--asphalt);
+  border: 3px solid var(--ink);
+  overflow: hidden;
+}
+
+.route__road::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  background: repeating-linear-gradient(90deg, var(--cream) 0 14px, transparent 14px 28px);
+}
+
+.route__bus {
+  position: absolute;
+  left: 0;
+  bottom: 14px;
+  width: 92px;
+  aspect-ratio: 420 / 240;
+  will-change: transform;
+}
+
+.route__bus svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.route__bus .bus__badge {
+  display: none;
+}
+
+.route__flag {
+  position: absolute;
+  right: 4px;
+  bottom: 20px;
+  width: 30px;
+  height: auto;
+}
+
+.confetti {
+  position: absolute;
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Il player esiste ma non si vede: la pagina non ha testo, e Spotify ne
+   mostra. Resta nel viewport, altrimenti il lazy loading non lo caricherebbe. */
+.player {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 300px;
+  height: 352px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.player iframe {
+  display: block;
+}
+
+.sound {
+  position: fixed;
+  right: 18px;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  background: var(--cream);
+  color: var(--ink);
+  box-shadow: 0 10px 18px -10px rgba(43, 38, 34, 0.6);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.sound:active {
+  transform: scale(0.94);
+}
+
+.sound .sound__play {
+  display: none;
+}
+
+.sound.is-paused .sound__play {
+  display: block;
+}
+
+.sound.is-paused .sound__pause {
+  display: none;
+}
+
+/* La scena 3D è un unico canvas fisso sopra la pagina: disegna gli oggetti
+   esattamente dove stanno le loro versioni 2D, che restano nella pagina come
+   segnaposto (e come ripiego se il 3D non si carica). */
+.stage3d {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.has-3d .bus__art,
+.has-3d .sun,
+.has-3d .route__bus svg,
+.has-3d .route__flag {
+  visibility: hidden;
+}
+
+/* Lightbox */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(43, 38, 34, 0.94);
+  z-index: 100;
+  padding: 26px;
+}
+
+.lightbox.is-open {
+  display: flex;
+}
+
+.lightbox__img {
+  display: block;
+  max-width: 100%;
+  max-height: 84vh;
+  border: 10px solid var(--cream);
+  border-bottom-width: 36px;
+  border-radius: 4px;
+}
+
+.lightbox__close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  background: var(--sun);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.lightbox__close:active {
+  transform: scale(0.94);
+}
+
+@media (min-width: 734px) {
+  .strip {
+    gap: 30px;
+    padding-inline: 40px;
+    scroll-padding-inline: 40px;
+  }
+
+  .shot img {
+    max-width: 560px;
+  }
+
+  .route {
+    margin-inline: 40px;
+  }
+
+  .route__bus {
+    width: 112px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+</style>
 </head>
 <body>
 
@@ -107,7 +522,935 @@
   <img class="lightbox__img" id="lightboxImg" alt="">
 </div>
 
+<!-- Condiviso con build.js, che cifra le foto: tenerlo in un file solo evita
+     che la pagina e il build usino due versioni diverse della cifratura. -->
 <script src="laurea-crypto.js"></script>
-<script type="module" src="script.js"></script>
+
+<script type="module">
+import { animate, inView, scroll } from "motion";
+
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const canHover = window.matchMedia("(hover: hover)").matches;
+
+/* La pagina comincia sempre dal pulmino parcheggiato, anche ricaricando. */
+history.scrollRestoration = "manual";
+
+const EASE_OUT = [0.22, 1, 0.36, 1];
+/* Partenza: lenta allo stacco, poi via, come un motore che prende giri. */
+const EASE_DEPART = [0.55, 0, 0.85, 0.35];
+
+/* Inclinazioni fisse: stampe appoggiate a mano, non ruotate a caso. */
+const TILTS = [-1.6, 1.1, -0.7, 1.5, -1.2, 0.8, -1.4, 1.3, -0.9, 1.6, -1.1, 0.7];
+
+const scene = document.getElementById("scene");
+const bus = document.getElementById("bus");
+const busBody = bus.querySelector(".bus__body");
+const busBadge = bus.querySelector(".bus__badge");
+const busWheels = bus.querySelectorAll(".wheel");
+const trip = document.getElementById("foto");
+
+/* La scena 3D, se si carica. Finché è null vale la versione 2D. */
+let stage = null;
+
+/* ---------- Canzone ----------
+   Il player Spotify è nascosto: lo si comanda dall'esterno con i messaggi
+   che accetta. "toggle" avvia un player fermo (anche ad anteprima finita,
+   dove "resume" viene rifiutato) ma mette in pausa uno che suona: per questo
+   si riprova solo se il player non ha risposto e si ignorano i tocchi
+   mentre un avvio è in corso. */
+const SPOTIFY_ORIGIN = "https://open.spotify.com";
+const player = document.querySelector(".player iframe");
+const sound = document.getElementById("sound");
+const song = { playing: false, starting: false, heardAt: 0, everStarted: false };
+
+function updateSoundButton() {
+  if (!song.everStarted) return;
+  sound.hidden = false;
+  sound.classList.toggle("is-paused", !song.playing);
+  sound.setAttribute("aria-label", song.playing ? "Metti in pausa la canzone" : "Fai ripartire la canzone");
+}
+
+window.addEventListener("message", (e) => {
+  if (e.origin !== SPOTIFY_ORIGIN || !e.data) return;
+  const { type, payload } = e.data;
+  if (type !== "playback_started" && type !== "playback_update") return;
+
+  song.heardAt = performance.now();
+  if (type === "playback_started") {
+    song.playing = true;
+    song.everStarted = true;
+  }
+  if (type === "playback_update") {
+    song.playing = !payload.isPaused && payload.position < payload.duration;
+  }
+  updateSoundButton();
+});
+
+function sendToPlayer(command) {
+  player.contentWindow?.postMessage({ command }, SPOTIFY_ORIGIN);
+}
+
+function playSong() {
+  if (song.playing || song.starting) return;
+  song.starting = true;
+
+  let attempts = 0;
+  const tryStart = () => {
+    attempts += 1;
+    const sentAt = performance.now();
+    sendToPlayer("toggle");
+    setTimeout(() => {
+      if (song.heardAt < sentAt && attempts < 7) tryStart();
+      else song.starting = false;
+    }, 1200);
+  };
+  tryStart();
+}
+
+sound.addEventListener("click", () => {
+  if (song.playing) sendToPlayer("pause");
+  else playSong();
+});
+
+/* ---------- Il pulmino (versione 2D) ---------- */
+let idleLoop = null;
+let badgeLoop = null;
+let busBusy = false;
+
+/* Al minimo il motore fa tremare la carrozzeria, le ruote restano ferme.
+   Il bollino play respira ogni tanto: è l'unico invito a toccare. */
+function idle() {
+  if (reduceMotion || stage) return;
+  idleLoop = animate(busBody, { y: [0, -2.2, 0] }, { duration: 0.42, repeat: Infinity, easing: "ease-in-out" });
+  badgeLoop = animate(
+    busBadge,
+    { scale: [1, 1.14, 1] },
+    { duration: 0.7, repeat: Infinity, repeatDelay: 1.8, easing: "ease-in-out" }
+  );
+}
+
+function stopIdle() {
+  idleLoop?.stop();
+  badgeLoop?.stop();
+  animate(busBody, { y: 0 }, { duration: 0.1 });
+  animate(busBadge, { scale: 1 }, { duration: 0.1 });
+}
+
+function spin(wheels, secondsPerTurn) {
+  return animate(wheels, { rotate: [0, 360] }, { duration: secondsPerTurn, repeat: Infinity, easing: "linear" });
+}
+
+/* Sbuffi di scarico dal retro del pulmino. offsetX è di quanto il pulmino
+   si è spostato rispetto al suo posto (serve alla versione 3D, dove il
+   pulsante resta fermo e si muove il modello). */
+function puffs(offsetX = 0) {
+  const box = bus.getBoundingClientRect();
+  const origin = scene.getBoundingClientRect();
+  for (let i = 0; i < 3; i++) {
+    const puff = document.createElement("span");
+    puff.className = "puff";
+    puff.style.left = `${box.left - origin.left + offsetX + box.width * 0.02}px`;
+    puff.style.top = `${box.top - origin.top + box.height * 0.7}px`;
+    scene.appendChild(puff);
+    animate(
+      puff,
+      { opacity: [0.95, 0], scale: [0.35, 1.7], x: [0, -46 - i * 22], y: [0, -16 - i * 10] },
+      { duration: 0.9, delay: i * 0.12, easing: EASE_OUT }
+    ).finished.then(() => puff.remove());
+  }
+}
+
+/* Tocco: parte la canzone, il pulmino si carica all'indietro e parte.
+   Poi rientra da sinistra e si riparcheggia, così l'apertura non resta vuota. */
+async function drive() {
+  playSong();
+  if (busBusy) return;
+  busBusy = true;
+
+  const goToPhotos = !trip.hidden;
+
+  if (reduceMotion) {
+    if (goToPhotos) trip.scrollIntoView();
+    busBusy = false;
+    return;
+  }
+
+  if (stage) {
+    await stage.drive(goToPhotos);
+    busBusy = false;
+    return;
+  }
+
+  stopIdle();
+  await animate(bus, { x: -16, rotate: -1.2 }, { duration: 0.2, easing: EASE_OUT }).finished;
+
+  const wheels = spin(busWheels, 0.32);
+  puffs();
+  const distance = window.innerWidth + bus.offsetWidth;
+  await animate(bus, { x: distance, rotate: 0 }, { duration: 1.15, easing: EASE_DEPART }).finished;
+
+  if (goToPhotos) trip.scrollIntoView({ behavior: "smooth" });
+
+  await animate(bus, { x: [-distance, 0] }, { duration: 1.5, delay: 0.5, easing: EASE_OUT }).finished;
+  wheels.stop();
+  idle();
+  busBusy = false;
+}
+
+bus.addEventListener("click", drive);
+
+/* ---------- Foto cifrate ----------
+   Online ci sono solo photos/N.bin (generati da build.js). La chiave arriva
+   dal QR dopo il "#" e non lascia mai il browser. */
+const KEY_STORE = "laurea-key";
+
+/* Prende la chiave dal frammento e la toglie dalla barra degli indirizzi,
+   così chi condivide il link non condivide la chiave. La copia in
+   sessionStorage fa sopravvivere un ricaricamento della scheda. */
+function takeKey() {
+  const fromHash = window.LaureaCrypto.fromB64url(location.hash.slice(1));
+  if (fromHash) {
+    try {
+      sessionStorage.setItem(KEY_STORE, location.hash.slice(1));
+    } catch {}
+    history.replaceState(null, "", location.pathname + location.search);
+    return fromHash;
+  }
+  try {
+    return window.LaureaCrypto.fromB64url(sessionStorage.getItem(KEY_STORE) || "");
+  } catch {
+    return null;
+  }
+}
+
+async function decryptPhoto(key, n) {
+  try {
+    const res = await fetch(`photos/${n}.bin`);
+    if (!res.ok) return null;
+    const plain = await window.LaureaCrypto.open(key, new Uint8Array(await res.arrayBuffer()));
+    return plain ? URL.createObjectURL(new Blob([plain], { type: "image/jpeg" })) : null;
+  } catch {
+    return null;
+  }
+}
+
+/* Il viaggio parte nascosto e compare alla prima foto decifrata: senza
+   chiave, o con una chiave sbagliata, resta solo il pulmino con la musica. */
+function revealTrip() {
+  if (!trip.hidden) return;
+  trip.hidden = false;
+  bus.setAttribute("aria-label", "Play: fa partire la canzone e ti porta alle foto");
+  initRoute();
+}
+
+async function buildGallery() {
+  const raw = takeKey();
+  if (!raw) return;
+
+  let key;
+  let numbers;
+  try {
+    key = await window.LaureaCrypto.importKey(raw);
+    numbers = (await (await fetch("photos/manifest.json")).json()).photos;
+  } catch {
+    return;
+  }
+
+  const strip = document.getElementById("strip");
+
+  numbers.forEach((n, i) => {
+    const img = new Image();
+    img.alt = `Foto ${n}`;
+    img.decoding = "async";
+
+    /* Le stampe entrano subito nell'ordine dei numeri e si riempiono quando
+       la foto è decifrata: aspettando, l'ordine sarebbe quello della rete. */
+    const shot = addShot(strip, img, TILTS[i % TILTS.length]);
+
+    decryptPhoto(key, n).then((url) => {
+      if (!url) {
+        shot.remove();
+        return;
+      }
+      img.src = url;
+      revealTrip();
+    });
+  });
+}
+
+function addShot(strip, img, tilt) {
+  const shot = document.createElement("button");
+  shot.className = "shot";
+  shot.type = "button";
+  shot.setAttribute("aria-label", `Apri a schermo intero: ${img.alt}`);
+  shot.style.transform = `rotate(${tilt}deg)`;
+  shot.appendChild(img);
+  strip.appendChild(shot);
+
+  shot.addEventListener("click", () => {
+    if (img.src) openLightbox(img.src, shot);
+  });
+
+  if (reduceMotion) return shot;
+
+  shot.style.opacity = 0;
+  inView(
+    shot,
+    () => {
+      animate(
+        shot,
+        {
+          opacity: [0, 1],
+          transform: [`rotate(${tilt * 2.4}deg) translateY(18px) scale(0.94)`, `rotate(${tilt}deg) translateY(0px) scale(1)`],
+        },
+        { duration: 0.7, easing: EASE_OUT }
+      );
+    },
+    { root: strip, amount: 0.3 }
+  );
+
+  if (canHover) {
+    shot.addEventListener("pointerenter", () => {
+      animate(shot, { transform: `rotate(${tilt * 0.25}deg) translateY(-6px) scale(1.04)` }, { type: "spring", stiffness: 260, damping: 20 });
+    });
+    shot.addEventListener("pointerleave", () => {
+      animate(shot, { transform: `rotate(${tilt}deg) translateY(0px) scale(1)` }, { type: "spring", stiffness: 260, damping: 22 });
+    });
+  }
+
+  return shot;
+}
+
+/* ---------- La strada sotto le foto ----------
+   Un pulmino piccolo avanza mentre scorri le foto. È legato al gesto, non
+   è un'animazione autonoma, quindi resta anche con il movimento ridotto. */
+let celebrated = false;
+
+function initRoute() {
+  const strip = document.getElementById("strip");
+  const route = document.getElementById("route");
+  const slot = document.getElementById("miniBus");
+
+  const art = bus.querySelector(".bus__art").cloneNode(true);
+  art.querySelector("clipPath").id = "busShapeMini";
+  art.querySelector("[clip-path]").setAttribute("clip-path", "url(#busShapeMini)");
+  slot.appendChild(art);
+  const wheels = art.querySelectorAll(".wheel");
+
+  scroll(
+    (progress) => {
+      const travel = route.clientWidth - slot.offsetWidth - 38;
+      slot.style.transform = `translateX(${progress * travel}px)`;
+      wheels.forEach((w) => {
+        w.style.transform = `rotate(${progress * 1440}deg)`;
+      });
+      stage?.invalidate();
+      if (progress > 0.97 && !celebrated) {
+        celebrated = true;
+        celebrate();
+      }
+    },
+    { container: strip, axis: "x" }
+  );
+
+  stage?.routeReady();
+}
+
+/* Arrivo al traguardo: coriandoli, una volta sola. */
+function celebrate() {
+  if (reduceMotion) return;
+  const flag = document.querySelector(".route__flag").getBoundingClientRect();
+  const origin = trip.getBoundingClientRect();
+  const colors = ["#e4572e", "#fff8e1", "#2b2622", "#bfe3f2", "#f7c51e"];
+
+  for (let i = 0; i < 30; i++) {
+    const bit = document.createElement("span");
+    bit.className = "confetti";
+    bit.style.background = colors[i % colors.length];
+    bit.style.left = `${flag.left - origin.left + flag.width / 2}px`;
+    bit.style.top = `${flag.top - origin.top}px`;
+    trip.appendChild(bit);
+
+    const spreadX = (Math.random() - 0.65) * 320;
+    const rise = 110 + Math.random() * 120;
+    animate(
+      bit,
+      {
+        x: [0, spreadX * 0.6, spreadX],
+        y: [0, -rise, -rise + 190],
+        rotate: [0, (Math.random() - 0.5) * 720],
+        opacity: [1, 1, 0],
+      },
+      { duration: 1.5 + Math.random() * 0.6, easing: "ease-out" }
+    ).finished.then(() => bit.remove());
+  }
+}
+
+/* ---------- Lightbox ----------
+   La foto si espande dalla stampa toccata e ci ritorna. */
+const lightbox = document.getElementById("lightbox");
+const lightboxImg = document.getElementById("lightboxImg");
+const lightboxClose = document.getElementById("lightboxClose");
+let lastFocused = null;
+let closing = false;
+
+function flipFrom(sourceEl) {
+  const sourceImg = sourceEl.querySelector("img");
+  if (!sourceImg) return null;
+  const from = sourceImg.getBoundingClientRect();
+  const to = lightboxImg.getBoundingClientRect();
+  if (!to.width || !to.height || !from.width) return null;
+  const s = from.width / to.width;
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  return `translate(${dx}px, ${dy}px) scale(${s})`;
+}
+
+function openLightbox(src, trigger) {
+  lastFocused = trigger;
+  closing = false;
+  lightboxImg.src = src;
+  lightboxImg.alt = `${trigger.querySelector("img")?.alt ?? "Foto"}, ingrandita`;
+  lightbox.classList.add("is-open");
+  lightbox.setAttribute("aria-hidden", "false");
+  lightboxClose.focus();
+
+  if (reduceMotion) return;
+
+  requestAnimationFrame(() => {
+    const start = flipFrom(trigger);
+    animate(lightbox, { opacity: [0, 1] }, { duration: 0.28, easing: EASE_OUT });
+    animate(
+      lightboxImg,
+      start ? { transform: [start, "translate(0px, 0px) scale(1)"] } : { opacity: [0, 1], transform: ["scale(0.94)", "scale(1)"] },
+      { duration: 0.5, easing: EASE_OUT }
+    );
+  });
+}
+
+function dismiss() {
+  lightbox.classList.remove("is-open");
+  lightbox.setAttribute("aria-hidden", "true");
+  lightbox.style.opacity = "";
+  lightboxImg.style.opacity = "";
+  lightboxImg.style.transform = "";
+  closing = false;
+  if (lastFocused) lastFocused.focus();
+}
+
+function closeLightbox() {
+  if (closing) return;
+  if (reduceMotion) {
+    dismiss();
+    return;
+  }
+  closing = true;
+  const end = lastFocused ? flipFrom(lastFocused) : null;
+  animate(lightbox, { opacity: [1, 0] }, { duration: 0.32, easing: "ease-in" });
+  animate(
+    lightboxImg,
+    end ? { transform: ["translate(0px, 0px) scale(1)", end] } : { opacity: [1, 0], transform: ["scale(1)", "scale(0.97)"] },
+    { duration: 0.32, easing: "ease-in" }
+  ).finished.then(dismiss);
+}
+
+lightboxClose.addEventListener("click", closeLightbox);
+lightbox.addEventListener("click", (e) => {
+  if (e.target === lightbox) closeLightbox();
+});
+
+window.addEventListener("keydown", (e) => {
+  if (!lightbox.classList.contains("is-open")) return;
+  if (e.key === "Escape") {
+    closeLightbox();
+    return;
+  }
+  /* La chiusura è l'unico comando del lightbox: il focus resta lì dentro. */
+  if (e.key === "Tab") {
+    e.preventDefault();
+    lightboxClose.focus();
+  }
+});
+
+/* ---------- Scena 3D ----------
+   Pulmino, sole, pulmino piccolo e bandiera diventano oggetti Three.js,
+   disegnati da un solo canvas fisso esattamente sopra i loro segnaposto 2D:
+   stessa forma, posizione, misura e colori. Se Three.js non si carica o
+   WebGL manca, la pagina resta in 2D e tutto il resto funziona. */
+const COLORS = {
+  yellow: "#f7c51e",
+  cream: "#fff8e1",
+  ink: "#2b2622",
+  asphalt: "#3a342f",
+  glass: "#bfe3f2",
+  red: "#e4572e",
+  lamp: "#fff6c2",
+  hub: "#d9d2c3",
+  glow: "#ffe98a",
+};
+
+async function init3D() {
+  const THREE = await import("three");
+  const { RoundedBoxGeometry } = await import("three/addons/geometries/RoundedBoxGeometry.js");
+  const { mergeGeometries } = await import("three/addons/utils/BufferGeometryUtils.js");
+
+  const canvas = document.createElement("canvas");
+  canvas.className = "stage3d";
+  canvas.setAttribute("aria-hidden", "true");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+  renderer.setClearColor(0x000000, 0);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+
+  const world = new THREE.Scene();
+  const FOV = 30;
+  const camera = new THREE.PerspectiveCamera(FOV, 1, 1, 30000);
+
+  /* Luce morbida dall'alto a destra, dove sta il sole, e un riempimento
+     caldo da sotto: le facce in ombra restano calde, mai grigie. */
+  world.add(new THREE.HemisphereLight(0xffffff, 0xffe4a0, 2.1));
+  const key = new THREE.DirectionalLight(0xffffff, 1.5);
+  key.position.set(600, 900, 1200);
+  world.add(key);
+
+  /* Toon a tre toni con contorno: il 3D resta un'illustrazione, come prima. */
+  const ramp = new THREE.DataTexture(new Uint8Array([165, 215, 255]), 3, 1, THREE.RedFormat);
+  ramp.minFilter = THREE.NearestFilter;
+  ramp.magFilter = THREE.NearestFilter;
+  ramp.needsUpdate = true;
+
+  const toon = (hex, extra = {}) => new THREE.MeshToonMaterial({ color: hex, gradientMap: ramp, ...extra });
+  const flat = (hex, extra = {}) => new THREE.MeshBasicMaterial({ color: hex, ...extra });
+  const mats = {
+    yellow: toon(COLORS.yellow),
+    cream: toon(COLORS.cream),
+    glass: toon(COLORS.glass),
+    red: toon(COLORS.red),
+    lamp: toon(COLORS.lamp, { emissive: COLORS.lamp, emissiveIntensity: 0.35 }),
+    hub: toon(COLORS.hub),
+    tyre: toon(COLORS.asphalt),
+    ink: flat(COLORS.ink),
+    outline: flat(COLORS.ink, { side: THREE.BackSide }),
+  };
+
+  /* Pezzi raggruppati per materiale e fusi in una sola geometria: pochi
+     draw call, quindi 60fps anche sui telefoni. */
+  function batcher() {
+    const parts = {};
+    return {
+      add(matKey, geometry) {
+        (parts[matKey] ||= []).push(geometry.index ? geometry.toNonIndexed() : geometry);
+      },
+      build(target) {
+        for (const [matKey, list] of Object.entries(parts)) {
+          target.add(new THREE.Mesh(mergeGeometries(list), mats[matKey]));
+        }
+      },
+    };
+  }
+
+  function rbox(w, h, d, r, x, y, z) {
+    const g = new RoundedBoxGeometry(w, h, d, 3, r);
+    g.translate(x, y, z);
+    return g;
+  }
+
+  function box(w, h, d, x, y, z, rotZ = 0) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rotZ) g.rotateZ(rotZ);
+    g.translate(x, y, z);
+    return g;
+  }
+
+  function disc(r, depth, x, y, z, axis = "z") {
+    const g = new THREE.CylinderGeometry(r, r, depth, 28);
+    if (axis === "z") g.rotateX(Math.PI / 2);
+    if (axis === "x") g.rotateZ(Math.PI / 2);
+    g.translate(x, y, z);
+    return g;
+  }
+
+  /* Il pulmino, costruito nelle stesse unità del disegno 2D (420x240, centro
+     in 210,120): così la sagoma coincide con quella di prima. Profondità
+     150, ruote e passaruota alle stesse quote del disegno. */
+  const BODY_D = 150;
+  const WHEEL_R = 27;
+
+  function createBus({ withBadge }) {
+    const root = new THREE.Group();
+    const pose = new THREE.Group();
+    const body = new THREE.Group();
+    root.add(pose);
+    pose.add(body);
+
+    const b = batcher();
+    const half = BODY_D / 2;
+
+    b.add("yellow", rbox(364, 82, BODY_D, 14, 0, -29, 0));
+    b.add("cream", rbox(364, 82, BODY_D, 26, 0, 51, 0));
+    b.add("outline", rbox(369, 87, BODY_D + 5, 16.5, 0, -29, 0));
+    b.add("outline", rbox(369, 87, BODY_D + 5, 28.5, 0, 51, 0));
+    b.add("ink", box(366, 3.5, BODY_D + 2, 0, 12, 0));
+
+    for (const side of [1, -1]) {
+      const z = side * (half + 0.6);
+      for (const cx of [83, 149, 215, 281, 347]) {
+        const x = cx - 210;
+        b.add("ink", box(60, 56, 1.2, x, 49, z));
+        b.add("glass", box(54, 50, 2, x, 49, z + side * 0.9));
+        b.add("cream", box(3.5, 30, 1, x, 49, z + side * 2, -0.49));
+      }
+      b.add("ink", box(3, 74, 1.4, 38, -29, z));
+      b.add("ink", box(3, 74, 1.4, 104, -29, z));
+      b.add("red", box(3, 22, 18, -183.5, -15, side * 52));
+      b.add("ink", disc(11.5, 2.5, 183, -28, side * 52, "x"));
+      b.add("lamp", disc(9, 4, 184.5, -28, side * 52, "x"));
+    }
+    b.add("ink", box(16, 6, 2, 54, -5, half + 1));
+
+    /* Parabrezza diviso, davanti, e lunotto dietro. */
+    for (const z of [30, -30]) {
+      b.add("ink", box(1.2, 56, 60, 182.6, 49, z));
+      b.add("glass", box(2, 50, 54, 183.4, 49, z));
+    }
+    b.add("ink", box(1.2, 44, 96, -182.6, 52, 0));
+    b.add("glass", box(2, 38, 90, -183.4, 52, 0));
+
+    /* Paraurti. */
+    for (const x of [-179, 179]) {
+      b.add("cream", rbox(38, 11, BODY_D + 6, 4, x, -65.5, 0));
+      b.add("outline", rbox(41, 14, BODY_D + 9, 5.5, x, -65.5, 0));
+    }
+    b.build(body);
+
+    let badge = null;
+    if (withBadge) {
+      badge = new THREE.Group();
+      badge.position.set(-60, -30, half);
+      badge.add(new THREE.Mesh(disc(26, 1.6, 0, 0, 0.8), mats.ink));
+      badge.add(new THREE.Mesh(disc(23, 3, 0, 0, 1.8), mats.cream));
+      const tri = new THREE.Shape([new THREE.Vector2(-7, 12), new THREE.Vector2(-7, -12), new THREE.Vector2(13, 0)]);
+      const triGeo = new THREE.ShapeGeometry(tri);
+      triGeo.translate(0, 0, 3.5);
+      badge.add(new THREE.Mesh(triGeo, mats.ink));
+      body.add(badge);
+    }
+
+    /* Passaruota: cilindri scuri appena più larghi della carrozzeria. */
+    const arches = batcher();
+    for (const x of [-108, 108]) arches.add("ink", disc(34, BODY_D + 2, x, -74, 0));
+    arches.build(pose);
+
+    const wheels = [];
+    /* Le ruote sporgono appena oltre i passaruota (z 76), altrimenti questi
+       le coprirebbero. */
+    for (const x of [-108, 108]) {
+      for (const z of [66, -66]) {
+        const wheel = new THREE.Group();
+        wheel.position.set(x, -74, z);
+        const w = batcher();
+        w.add("tyre", disc(WHEEL_R, 24, 0, 0, 0));
+        w.add("outline", disc(WHEEL_R + 2.5, 27, 0, 0, 0));
+        w.add("hub", disc(13, 25, 0, 0, 0));
+        w.add("ink", disc(4, 26, 0, 0, 0));
+        w.add("ink", box(6, 9, 26, 0, 8.5, 0));
+        w.build(wheel);
+        pose.add(wheel);
+        wheels.push(wheel);
+      }
+    }
+
+    /* Ombra a terra: un'ellisse morbida come quella del disegno. */
+    const shadowTex = (() => {
+      const c = document.createElement("canvas");
+      c.width = 128;
+      c.height = 32;
+      const g = c.getContext("2d");
+      const grad = g.createRadialGradient(64, 16, 2, 64, 16, 64);
+      grad.addColorStop(0, "rgba(43,38,34,0.32)");
+      grad.addColorStop(1, "rgba(43,38,34,0)");
+      g.fillStyle = grad;
+      g.setTransform(1, 0, 0, 0.25, 0, 12);
+      g.fillRect(0, -64, 128, 192);
+      return new THREE.CanvasTexture(c);
+    })();
+    const shadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(380, 34),
+      new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false })
+    );
+    shadow.position.set(0, -104, half);
+    root.add(shadow);
+
+    world.add(root);
+    return { root, pose, body, badge, wheels };
+  }
+
+  function createSun() {
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.38, 48, 32),
+      toon(COLORS.cream, { emissive: COLORS.cream, emissiveIntensity: 0.35, transparent: true })
+    );
+    /* Il bagliore è un disco piatto dietro la sfera: una seconda sfera la
+       attraverserebbe ai bordi quando la scena ruota. */
+    const halo = new THREE.Mesh(new THREE.CircleGeometry(0.62, 64), flat(COLORS.glow, { transparent: true }));
+    halo.position.z = -0.42;
+    group.add(halo, core);
+    world.add(group);
+    return { group, core, halo };
+  }
+
+  /* La bandiera: asta e drappo a scacchi che ondeggia al vento. */
+  function createFlag() {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(disc(2.2, 50, -14, -1, 0, "y"), mats.ink));
+
+    const c = document.createElement("canvas");
+    c.width = 112;
+    c.height = 88;
+    const g = c.getContext("2d");
+    g.fillStyle = COLORS.cream;
+    g.fillRect(0, 0, 112, 88);
+    g.fillStyle = COLORS.ink;
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 4; col++) {
+        if ((row + col) % 2 === 0) g.fillRect(col * 28, row * 29.3, 28, 29.3);
+      }
+    }
+    g.lineWidth = 10;
+    g.strokeStyle = COLORS.ink;
+    g.strokeRect(0, 0, 112, 88);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(28, 22, 14, 6), flat("#ffffff", { map: tex, side: THREE.DoubleSide }));
+    cloth.position.set(2, 11, 0);
+    group.add(cloth);
+    world.add(group);
+    return { group, cloth, rest: cloth.geometry.attributes.position.array.slice() };
+  }
+
+  const big = createBus({ withBadge: true });
+  const mini = createBus({ withBadge: false });
+  const sun = createSun();
+  const flag = createFlag();
+  mini.root.visible = false;
+  flag.group.visible = false;
+
+  const anchors = {
+    bus: bus,
+    sun: document.querySelector(".sun"),
+    mini: document.getElementById("miniBus"),
+    flag: document.querySelector(".route__flag"),
+  };
+
+  const motionOn = !reduceMotion;
+  const state = {
+    busX: 0,
+    lean: 0,
+    sunIn: motionOn ? 0 : 1,
+    routeIn: motionOn ? 0 : 1,
+    pointer: { x: 0, y: 0 },
+    smooth: { x: 0, y: 0 },
+  };
+
+  let vw = 0;
+  let vh = 0;
+  let dirty = true;
+  let tweens = 0;
+  let routeArmed = false;
+  const routeEl = document.getElementById("route");
+
+  function resize() {
+    /* Misure del viewport senza barra di scorrimento: sono quelle del canvas
+       fisso e delle coordinate dei segnaposto. innerWidth la includerebbe e
+       schiaccerebbe la scena in orizzontale. */
+    vw = document.documentElement.clientWidth;
+    vh = document.documentElement.clientHeight;
+    renderer.setSize(vw, vh, false);
+    camera.aspect = vw / vh;
+    /* A z=0 un'unità vale un pixel CSS: gli oggetti coincidono con i segnaposto. */
+    camera.position.set(0, 0, vh / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2)));
+    camera.updateProjectionMatrix();
+    dirty = true;
+  }
+
+  function tween(from, to, options, onUpdate) {
+    tweens += 1;
+    const ease = options.easing;
+    return animate(from, to, { ...options, ease, onUpdate: (v) => { onUpdate(v); dirty = true; } }).finished.then(() => {
+      tweens -= 1;
+    });
+  }
+
+  function visible(r) {
+    return r.bottom > -40 && r.top < vh + 40 && r.right > -40 && r.left < vw + 40 && r.width > 0;
+  }
+
+  /* Coordinate pagina -> mondo 3D (un pixel, un'unità). */
+  function place(obj, r, units, z = 0) {
+    const s = r.width / units;
+    obj.position.set(r.left + r.width / 2 - vw / 2, vh / 2 - (r.top + r.height / 2), z);
+    obj.scale.setScalar(s);
+    return s;
+  }
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const t = now / 1000;
+
+    const rBus = anchors.bus.getBoundingClientRect();
+    const rSun = anchors.sun.getBoundingClientRect();
+    const routeOn = !trip.hidden;
+    const rMini = routeOn ? anchors.mini.getBoundingClientRect() : null;
+    const rFlag = routeOn ? anchors.flag.getBoundingClientRect() : null;
+
+    const heroVisible = visible(rBus) || visible(rSun);
+    const routeVisible = routeOn && rMini && visible(rMini);
+    const animating = (motionOn && (heroVisible || routeVisible)) || tweens > 0;
+    if (!animating && !dirty) return;
+    dirty = false;
+
+    state.smooth.x += (state.pointer.x - state.smooth.x) * 0.06;
+    state.smooth.y += (state.pointer.y - state.smooth.y) * 0.06;
+    const px = motionOn ? state.smooth.x : 0;
+    const py = motionOn ? state.smooth.y : 0;
+
+    /* Quanto si è usciti dall'apertura: 0 in cima, 1 dopo una schermata. */
+    const scrolled = motionOn ? THREE.MathUtils.clamp(window.scrollY / Math.max(vh, 1), 0, 1) : 0;
+
+    /* Pulmino grande. */
+    const sBus = place(big.root, rBus, 420);
+    big.root.position.x += state.busX;
+    big.root.position.z = -(BODY_D / 2) * sBus - scrolled * 160;
+    big.root.position.y += motionOn ? Math.sin(t * 0.9) * 2.2 : 0;
+    big.pose.rotation.set(
+      0.07 + py * 0.06 + scrolled * 0.12,
+      -0.12 + px * 0.16 + scrolled * 0.55 + (motionOn ? Math.sin(t * 0.55) * 0.05 : 0),
+      state.lean * 0.035
+    );
+    big.body.position.y = motionOn && tweens === 0 ? Math.sin(t * 15) * 1.1 : 0;
+    const roll = -state.busX / (WHEEL_R * sBus);
+    big.wheels.forEach((w) => (w.rotation.z = roll));
+    if (big.badge) {
+      const beat = motionOn ? Math.pow(Math.max(0, Math.sin(t * 2.5)), 12) : 0;
+      big.badge.scale.setScalar(1 + beat * 0.14);
+    }
+
+    /* Sole: sorge all'arrivo, galleggia, si allontana con lo scroll. */
+    place(sun.group, rSun, 2);
+    const rise = 1 - state.sunIn;
+    sun.group.position.x += px * 14;
+    /* Lontano, quindi nello scroll resta indietro rispetto alla pagina. */
+    sun.group.position.y += (motionOn ? Math.sin(t * 0.5) * 6 : 0) - rise * 90 - py * 10 - scrolled * 120;
+    sun.group.position.z = -scrolled * 320;
+    sun.group.scale.multiplyScalar(0.85 + 0.15 * state.sunIn);
+    sun.core.rotation.set(py * 0.25, t * 0.12 + px * 0.4, 0);
+    sun.core.material.opacity = state.sunIn;
+    sun.halo.material.opacity = state.sunIn;
+    if (motionOn) sun.halo.scale.setScalar(1 + Math.sin(t * 0.7) * 0.02);
+
+    /* Pulmino piccolo e bandiera, sotto le foto. */
+    mini.root.visible = !!rMini;
+    flag.group.visible = !!rFlag;
+    if (rMini) {
+      const sMini = place(mini.root, rMini, 420);
+      mini.root.position.z = -(BODY_D / 2) * sMini;
+      mini.root.scale.multiplyScalar(Math.max(state.routeIn, 0.001));
+      mini.pose.rotation.set(0.1 + py * 0.08, -0.18 + px * 0.25 + (motionOn ? Math.sin(t * 0.8) * 0.06 : 0), 0);
+      const traveled = rMini.left - routeEl.getBoundingClientRect().left;
+      const miniRoll = -traveled / (WHEEL_R * sMini);
+      mini.wheels.forEach((w) => (w.rotation.z = miniRoll));
+      mini.body.position.y = motionOn ? Math.sin(t * 15) * 1.1 : 0;
+    }
+    if (rFlag) {
+      place(flag.group, rFlag, 40);
+      flag.group.scale.multiplyScalar(Math.max(state.routeIn, 0.001));
+      flag.group.rotation.y = px * 0.3 + (motionOn ? Math.sin(t * 0.7) * 0.15 : 0);
+      const pos = flag.cloth.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = flag.rest[i * 3];
+        const u = (x + 14) / 28;
+        pos.array[i * 3 + 2] = motionOn ? Math.sin(u * 4.6 - t * 4.2) * u * 3.4 : 0;
+      }
+      pos.needsUpdate = true;
+    }
+
+    renderer.render(world, camera);
+  }
+
+  resize();
+  window.addEventListener("resize", resize);
+  /* La barra di scorrimento compare con le foto e cambia la larghezza senza
+     un evento resize. */
+  new ResizeObserver(resize).observe(document.documentElement);
+  window.addEventListener("scroll", () => (dirty = true), { passive: true });
+  if (canHover && motionOn) {
+    window.addEventListener("pointermove", (e) => {
+      state.pointer.x = (e.clientX / Math.max(vw, 1)) * 2 - 1;
+      state.pointer.y = (e.clientY / Math.max(vh, 1)) * 2 - 1;
+    }, { passive: true });
+  }
+
+  /* Il primo fotogramma va disegnato prima di nascondere il 2D: nessun buco. */
+  document.body.appendChild(canvas);
+  stopIdle();
+  document.documentElement.classList.add("has-3d");
+  requestAnimationFrame(frame);
+
+  /* Entrata: il pulmino arriva da sinistra e parcheggia, il sole sorge. */
+  if (motionOn) {
+    const rBus = bus.getBoundingClientRect();
+    state.busX = -(window.innerWidth / 2 + rBus.width);
+    tween(state.busX, 0, { duration: 1.7, easing: EASE_OUT }, (v) => (state.busX = v));
+    tween(0, 1, { duration: 1.4, delay: 0.15, easing: EASE_OUT }, (v) => (state.sunIn = v));
+  }
+
+  return {
+    invalidate() {
+      dirty = true;
+    },
+
+    /* Il pulmino piccolo e la bandiera spuntano quando la strada entra in vista. */
+    routeReady() {
+      dirty = true;
+      if (!motionOn || routeArmed) return;
+      routeArmed = true;
+      inView(document.getElementById("route"), () => {
+        tween(0, 1, { duration: 0.8, easing: [0.34, 1.56, 0.64, 1] }, (v) => (state.routeIn = v));
+      }, { amount: 0.6 });
+    },
+
+    async drive(goToPhotos) {
+      await tween(0, 1, { duration: 0.2, easing: EASE_OUT }, (v) => {
+        state.lean = v;
+        state.busX = -16 * v;
+      });
+      puffs(state.busX);
+      const away = window.innerWidth / 2 + bus.offsetWidth * 1.2;
+      await tween(state.busX, away, { duration: 1.15, easing: EASE_DEPART }, (v) => {
+        state.busX = v;
+        state.lean = Math.max(0, state.lean - 0.02);
+      });
+      if (goToPhotos) trip.scrollIntoView({ behavior: "smooth" });
+      await tween(-(window.innerWidth / 2 + bus.offsetWidth), 0, { duration: 1.5, delay: 0.5, easing: EASE_OUT }, (v) => {
+        state.busX = v;
+        state.lean = 0;
+      });
+    },
+  };
+}
+
+idle();
+buildGallery();
+
+init3D()
+  .then((api) => {
+    stage = api;
+    if (!trip.hidden) stage.routeReady();
+  })
+  .catch(() => {
+    /* Niente 3D: resta la pagina 2D, identica e funzionante. */
+  });
+</script>
 </body>
 </html>
