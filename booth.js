@@ -220,7 +220,7 @@ export function createBooth({ onPhoto, wall }) {
   async function saveCard() {
     if (!current) return;
     const blob = await card();
-    const file = new File([blob], "ce-l-ho-fatta.jpg", { type: "image/jpeg" });
+    const file = new File([blob], "grazie.jpg", { type: "image/jpeg" });
     if (navigator.canShare?.({ files: [file] })) {
       try {
         await navigator.share({ files: [file] });

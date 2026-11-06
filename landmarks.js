@@ -20,6 +20,8 @@ class Kit {
     this.mover = null;
     this.rig = null;
     this.signs = [];
+    /* Il materiale di default del luogo: 0 intonaco, 1 mattoni, 2 conci. */
+    this.surf = 0;
     /* Le masse piene, per non attraversarle guidando. */
     this.masses = [];
   }
@@ -32,7 +34,7 @@ class Kit {
     for (let i = 0; i < n; i++) c.set([color.r, color.g, color.b], i * 3);
     geo.setAttribute("color", new THREE.BufferAttribute(c, 3));
     for (const k of Object.keys(geo.attributes)) if (!["position", "normal", "color"].includes(k)) geo.deleteAttribute(k);
-    geo.setAttribute("aSurf", new THREE.BufferAttribute(new Float32Array(n), 1));
+    geo.setAttribute("aSurf", new THREE.BufferAttribute(new Float32Array(n).fill(this.surf), 1));
     list.push(geo);
     return geo;
   }
@@ -781,6 +783,7 @@ export const LANDMARKS = {
      angeli, l'acqua lunga davanti, la cupola color piombo con i costoloni chiari,
      il tamburo a colonne binate, e Castel Sant'Angelo a destra sopra le mura. */
   tiber: {
+    surf: 2,
     side: 1,
     offset: 66,
     look: 26,
@@ -911,6 +914,7 @@ export const LANDMARKS = {
      gradini dove è crollato, dentro la cavea di cotto con le volte radiali e i
      sotterranei. La camera sale per guardarci dentro. */
   colosseum: {
+    surf: 2,
     side: 1,
     offset: 66,
     look: 10,
@@ -1136,6 +1140,7 @@ export const LANDMARKS = {
   /* Il Vittoriano: la scalea, l'altare, il portico curvo di colonne corinzie, i
      due propilei con le quadrighe alate in cima. */
   vittoriano: {
+    surf: 2,
     side: 1,
     offset: 62,
     look: 22,
@@ -1656,6 +1661,7 @@ export const LANDMARKS = {
      basso sull'acqua alla sua sinistra, le garitte, i merli a scudo, e la
      passerella di legno con il parapetto rosso che arriva da riva. */
   belem: {
+    surf: 2,
     side: -1,
     offset: 58,
     look: 19,
@@ -2003,6 +2009,7 @@ export const LANDMARKS = {
      le mura scure di salsedine col ciglio chiaro, i bastioni a punta, la casa con
      il tetto arancione, il faro, la bandiera, la spiaggia che comincia a ovest. */
   carcavelos: {
+    surf: 2,
     side: -1,
     offset: 58,
     look: 4,
@@ -2191,6 +2198,7 @@ function signMesh({ text, w, h, x, y, z, ink, ground, font }) {
 export function buildLandmark(name, solid, glow) {
   const spec = LANDMARKS[name];
   const kit = new Kit();
+  kit.surf = spec.surf ?? 0;
   spec.build(kit);
   const group = new THREE.Group();
   const a = bake(kit.solid, solid);
@@ -2401,6 +2409,23 @@ export function facadeTexture(style, sharp = true) {
   return t;
 }
 
+/* Passa la grana di una scansione su una facciata già dipinta. */
+export function weatherFacade(texture, image, strength) {
+  const c = texture.image;
+  const g = c.getContext("2d");
+  const k = c.width / 256;
+  g.save();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = "overlay";
+  g.globalAlpha = strength;
+  const p = g.createPattern(image, "repeat");
+  p.setTransform(new DOMMatrix().scale((k * 256) / 768 / 3.4));
+  g.fillStyle = p;
+  g.fillRect(0, 0, c.width, c.height);
+  g.restore();
+  texture.needsUpdate = true;
+}
+
 /* ---------- Il selciato ----------
    Tessere da ripetere: un tile in un quadrato, con la stessa scala del mondo. */
 function tile(size, draw) {
@@ -2412,57 +2437,6 @@ function tile(size, draw) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = 8;
   return t;
-}
-
-export function cobbleTexture(size) {
-  return tile(size, (g, S) => {
-    g.fillStyle = "#3f3b37";
-    g.fillRect(0, 0, S, S);
-    let seed = 91;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    const rows = 14;
-    const h = S / rows;
-    for (let r = 0; r < rows; r++) {
-      const w = h * 1.05;
-      const n = Math.round(S / w);
-      const step = S / n;
-      for (let i = -1; i <= n; i++) {
-        const x = i * step + (r % 2) * step * 0.5;
-        const v = 120 + rnd() * 62;
-        const tone = rnd() * 16;
-        const stone = g.createRadialGradient(x + step * 0.4, r * h + h * 0.4, 1, x + step * 0.5, r * h + h * 0.5, step * 0.62);
-        stone.addColorStop(0, `rgb(${v + 20 + tone},${v + 16 + tone * 0.7},${v + 10})`);
-        stone.addColorStop(1, `rgb(${v - 34},${v - 36},${v - 38})`);
-        g.fillStyle = stone;
-        g.beginPath();
-        g.roundRect(x + 1, r * h + 1, step - 2, h - 2, step * 0.2);
-        g.fill();
-      }
-    }
-  });
-}
-
-export function pavingTexture(size) {
-  return tile(size, (g, S) => {
-    let seed = 41;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    const n = 4;
-    const q = S / n;
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
-        const v = 170 + rnd() * 34;
-        g.fillStyle = `rgb(${v},${v - 5},${v - 14})`;
-        g.fillRect(x * q, y * q, q, q);
-        for (let i = 0; i < 40; i++) {
-          g.fillStyle = `rgba(40,34,28,${rnd() * 0.07})`;
-          g.fillRect(x * q + rnd() * q, y * q + rnd() * q, 1 + rnd() * 5, 1 + rnd() * 5);
-        }
-        g.fillStyle = "rgba(50,44,38,.55)";
-        g.fillRect(x * q, y * q, q, 2);
-        g.fillRect(x * q, y * q, 2, q);
-      }
-    }
-  });
 }
 
 export function groundTexture(size) {

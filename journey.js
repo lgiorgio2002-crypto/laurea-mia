@@ -5,11 +5,11 @@
 // riavvolge il film. Solo la vita di fondo (aria, onde, foto che respirano) va
 // avanti da sola.
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { createBus } from "./bus.js";
 import { FINALE_SKY, PALETTES, PARTICLES, THANKS } from "./chapters.js";
-import { buildLandmark, cobbleTexture, facadeTexture, groundTexture, LANDMARKS, pavingTexture } from "./landmarks.js";
+import { buildLandmark, facadeTexture, groundTexture, LANDMARKS, weatherFacade } from "./landmarks.js";
 import { CITIES, onBeachFront, onLand, outlines, ROUTE } from "./map.js";
 
 /* Un passo fermo dura così, in secondi. I tocchi in coda lo accorciano. */
@@ -291,6 +291,10 @@ function ribbon(s0, s1, step, offsets, heightAt) {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  /* La strada è piana: la normale guarda in alto. */
+  const up = new Float32Array(rows * cols * 3);
+  for (let i = 1; i < up.length; i += 3) up[i] = 1;
+  g.setAttribute("normal", new THREE.BufferAttribute(up, 3));
   g.setIndex(idx);
   return g;
 }
@@ -307,8 +311,23 @@ void main() {
 const SKY_FRAG = /* glsl */ `
 varying vec3 vDir;
 uniform vec3 uTop, uMid, uLow, uSun, uSunDir;
-uniform float uStars;
+uniform float uStars, uTime;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float cn(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash(vec3(i, 1.0)), b = hash(vec3(i + vec2(1, 0), 1.0)), c = hash(vec3(i + vec2(0, 1), 1.0)), e = hash(vec3(i + vec2(1, 1), 1.0));
+  return mix(mix(a, b, f.x), mix(c, e, f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += cn(p) * a;
+    p = p * 2.03 + 7.1;
+    a *= 0.5;
+  }
+  return v;
+}
 void main() {
   vec3 d = normalize(vDir);
   float h = max(d.y, 0.0);
@@ -321,6 +340,15 @@ void main() {
     vec3 cell = floor(d * 170.0);
     float s = step(0.9965, hash(cell));
     c += vec3(s * uStars * smoothstep(0.02, 0.3, h) * (0.5 + 0.5 * hash(cell + 3.0)));
+  }
+  if (d.y > 0.0) {
+    /* Nuvole su un soffitto piatto: si stringono verso l'orizzonte. */
+    vec2 q = d.xz / (d.y + 0.14) * 0.9 + vec2(uTime * 0.006, uTime * 0.002);
+    float f = fbm(q);
+    float cover = smoothstep(0.5, 0.78, f) * smoothstep(0.015, 0.16, d.y) * (1.0 - uStars * 0.8);
+    float lit = 0.72 + 0.5 * smoothstep(0.45, 0.8, fbm(q + uSunDir.xz * 0.12));
+    vec3 cloud = mix(uLow, vec3(1.0), 0.62) * lit + uSun * pow(a, 6.0) * 0.3;
+    c = mix(c, cloud, cover * 0.86);
   }
   gl_FragColor = vec4(c, 1.0);
   #include <colorspace_fragment>
@@ -370,12 +398,14 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-/* L'invecchiamento dei luoghi, nel materiale: mattoni con la malta, conci di
-   pietra, chiazze, colature, sporco che sale da terra. Lontano si spegne, così
-   non sfarfalla. */
+/* L'invecchiamento dei luoghi: ogni muro prende la grana di una scansione vera
+   secondo il suo materiale, con rilievo, colature e sporco che sale da terra. */
 const WEAR_HEAD = /* glsl */ `
 varying float vSurf;
 varying vec3 vWp;
+uniform sampler2D uBrick, uStone, uPlaster;
+float wearH = 0.5;
+bool wearGlass = false;
 float wHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float wNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
@@ -389,31 +419,40 @@ const WEAR_BODY = /* glsl */ `
   float up = abs(fn.y);
   float along = abs(fn.x) > abs(fn.z) ? vWp.z : vWp.x;
   vec2 q = up > 0.7 ? vWp.xz : vec2(along, vWp.y);
-  float blotch = wNoise(q * 0.32) * 0.6 + wNoise(q * 1.1) * 0.4;
-  float k = 0.86 + blotch * 0.26;
+  const vec3 toLum = vec3(0.3, 0.59, 0.11);
+  float bl = dot(texture2D(uBrick, q / 3.4).rgb, toLum) / BRICK_MEAN;
+  float st = dot(texture2D(uStone, q / 13.0).rgb, toLum) / STONE_MEAN;
+  float pl = dot(texture2D(uPlaster, q / 7.0).rgb, toLum) / PLASTER_MEAN;
+  float grain = mix(1.0, pl, 0.75);
+  if (vSurf > 1.5) grain = st;
+  else if (vSurf > 0.5) grain = bl;
+  wearH = grain;
+  float luma = dot(diffuseColor.rgb, toLum);
+  wearGlass = luma < 0.09 && up < 0.7 && vSurf < 0.5;
+  float k = wearGlass ? 1.0 : grain;
+  float blotch = wNoise(q * 0.2) * 0.6 + wNoise(q * 0.9) * 0.4;
+  k *= 0.88 + blotch * 0.24;
   if (up < 0.7) {
-    float streak = wNoise(vec2(along * 1.4, vWp.y * 0.07));
-    k *= 1.0 - smoothstep(0.55, 0.85, streak) * 0.22;
-    k *= 0.62 + 0.38 * smoothstep(0.0, 3.2, vWp.y);
-    float fade = 1.0 - smoothstep(0.03, 0.2, fwidth(vWp.y) + fwidth(along));
-    if (vSurf > 0.5 && vSurf < 1.5) {
-      vec2 b = vec2(along / 0.66, vWp.y / 0.26);
-      b.x += mod(floor(b.y), 2.0) * 0.5;
-      vec2 f = fract(b);
-      float tone = wHash(floor(b));
-      float joint = smoothstep(0.0, 0.08, f.x) * smoothstep(0.0, 0.08, 1.0 - f.x) * smoothstep(0.0, 0.14, f.y) * smoothstep(0.0, 0.14, 1.0 - f.y);
-      k *= mix(1.0, (0.8 + tone * 0.34) * mix(1.5, 1.0, joint), fade);
-    } else if (vSurf > 1.5) {
-      vec2 b = vec2(along / 1.5, vWp.y / 0.62);
-      b.x += mod(floor(b.y), 2.0) * 0.5;
-      vec2 f = fract(b);
-      float tone = wHash(floor(b));
-      float joint = smoothstep(0.0, 0.03, f.x) * smoothstep(0.0, 0.03, 1.0 - f.x) * smoothstep(0.0, 0.06, f.y) * smoothstep(0.0, 0.06, 1.0 - f.y);
-      k *= mix(1.0, (0.92 + tone * 0.14) * mix(0.72, 1.0, joint), fade);
-    }
+    float streak = wNoise(vec2(along * 0.32, vWp.y * 0.05));
+    k *= 1.0 - smoothstep(0.55, 0.9, streak) * 0.13;
+    k *= 0.6 + 0.4 * smoothstep(0.0, 3.2, vWp.y);
   }
   diffuseColor.rgb *= k;
 }`;
+
+/* Il rilievo: la grana diventa una piccola deviazione della normale. */
+const WEAR_RELIEF = /* glsl */ `
+#ifdef WEAR_DETAIL
+if (!wearGlass) {
+  vec3 sx = dFdx(-vViewPosition);
+  vec3 sy = dFdy(-vViewPosition);
+  vec3 r1 = cross(sy, normal);
+  vec3 r2 = cross(normal, sx);
+  float det = dot(sx, r1);
+  vec3 g = sign(det) * (dFdx(wearH) * r1 + dFdy(wearH) * r2) * 0.5;
+  normal = normalize(abs(det) * normal - g);
+}
+#endif`;
 
 const SEA_VERT = /* glsl */ `
 varying vec3 vWorld;
@@ -615,6 +654,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isPhone, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isPhone ? 1.6 : 1.75));
 
+  /* Pellicola: alte luci morbide sui materiali. Foto e cielo restano quelli veri. */
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 0.92;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
@@ -642,6 +684,17 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   ramp.needsUpdate = true;
   const toon = (hex, extra = {}) => new THREE.MeshToonMaterial({ color: hex, gradientMap: ramp, ...extra });
   const flat = (hex, extra = {}) => new THREE.MeshBasicMaterial({ color: hex, ...extra });
+  /* Sul computer i materiali fisici, sul telefono Lambert: stessa resa di base. */
+  const surface = ({ roughness = 0.9, ...rest }) => (isPhone ? new THREE.MeshLambertMaterial(rest) : new THREE.MeshStandardMaterial({ roughness, metalness: 0, ...rest }));
+  const textures = new THREE.TextureLoader();
+  const aniso = Math.min(renderer.capabilities.getMaxAnisotropy(), isPhone ? 4 : 8);
+  const scan = (name, color = true) => {
+    const t = textures.load(`textures/${name}.jpg`);
+    if (color) t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = aniso;
+    return t;
+  };
 
   /* Cielo */
   const skyUniforms = {
@@ -651,6 +704,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     uSun: { value: new THREE.Color() },
     uSunDir: { value: new THREE.Vector3(0, 0.3, -1) },
     uStars: { value: 0 },
+    uTime: { value: 0 },
   };
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(10, 32, 16),
@@ -679,9 +733,10 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       return g;
     })
   );
-  const groundMat = flat(0xffffff, { side: THREE.DoubleSide, map: groundTexture(isPhone ? 256 : 512) });
+  const groundMat = surface({ color: 0xffffff, side: THREE.DoubleSide, map: groundTexture(isPhone ? 256 : 512) });
   const ground = new THREE.Mesh(landGeo, groundMat);
   ground.frustumCulled = false;
+  ground.receiveShadow = true;
   world.add(ground);
 
   /* Una fascia tra due linee: argini e spiaggia. */
@@ -693,6 +748,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    const up = new Float32Array(pos.length);
+    for (let i = 1; i < up.length; i += 3) up[i] = 1;
+    g.setAttribute("normal", new THREE.BufferAttribute(up, 3));
     return g;
   }
   const shift = (line, dz) => line.map(([x, z]) => [x, z + dz]);
@@ -706,10 +764,11 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   world.add(banks);
 
   /* Sabbia: un po' sulla terra, poi giù verso l'acqua. */
-  const sandMat = flat("#ecd6a4", { side: THREE.DoubleSide });
+  const sandMat = surface({ color: "#ecd6a4", side: THREE.DoubleSide });
   const wetMat = flat("#a98a5e", { side: THREE.DoubleSide });
   const sand = new THREE.Mesh(mergeGeometries([strip(shift(shape.sand, -72), shape.sand, -0.03, -0.03), strip(shape.sand, shift(shape.sand, 30), -0.03, -1.6)]), sandMat);
   sand.frustumCulled = false;
+  sand.receiveShadow = true;
   world.add(sand);
 
   /* Acqua */
@@ -781,29 +840,32 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   /* La strada: selciato, cordolo di pietra, marciapiede. Sotto l'aula e sui
      ponti il marciapiede sparisce. */
   const along = (offsets, height) => mergeGeometries(legs.map((l) => ribbon(l.start, l.end, 2.5, offsets, height)));
-  const tilePx = isPhone ? 512 : 1024;
-  const roadMat = flat(0xffffff, { side: THREE.DoubleSide, map: cobbleTexture(tilePx) });
-  const road = new THREE.Mesh(along([-ROAD_HALF, ROAD_HALF], () => 0), roadMat);
+  const roadMat = surface({ side: THREE.DoubleSide, roughness: 0.82, map: scan("cobble"), normalMap: scan("cobble_nor", false), normalScale: new THREE.Vector2(1.1, 1.1) });
+  /* Appena sopra le piazze dei luoghi, che arrivano fino a bordo strada. */
+  const road = new THREE.Mesh(along([-ROAD_HALF, ROAD_HALF], () => 0.09), roadMat);
   road.frustumCulled = false;
+  road.receiveShadow = true;
   const sunk = (s) => {
     const p = roadPoint(s);
     return !onLand(p.x, p.z, 8) || beats.some((b) => b.through && Math.abs(s - b.s) < 38);
   };
-  const walkMat = flat(0xffffff, { side: THREE.DoubleSide, map: pavingTexture(tilePx) });
+  const walkMat = surface({ side: THREE.DoubleSide, roughness: 0.92, map: scan("paving"), normalMap: scan("paving_nor", false) });
   const kerbY = (s) => (sunk(s) ? -0.8 : 0.15);
   const walk = new THREE.Mesh(mergeGeometries([along([ROAD_HALF, WALK_HALF], (o, s) => kerbY(s)), along([-WALK_HALF, -ROAD_HALF], (o, s) => kerbY(s))]), walkMat);
   walk.frustumCulled = false;
-  const paintMat = flat("#fff8e1", { side: THREE.DoubleSide });
+  walk.receiveShadow = true;
+  const paintMat = surface({ color: "#c9c2b2", side: THREE.DoubleSide });
   const kerb = new THREE.Mesh(
     mergeGeometries(
       [1, -1].flatMap((e) => [
-        along([e * ROAD_HALF, e * ROAD_HALF * 0.999], (o, s) => (Math.abs(o) > ROAD_HALF * 0.9995 ? kerbY(s) : 0)),
+        along([e * ROAD_HALF, e * ROAD_HALF * 0.999], (o, s) => (Math.abs(o) > ROAD_HALF * 0.9995 ? kerbY(s) : 0.09)),
         along(e > 0 ? [ROAD_HALF, ROAD_HALF + 0.4] : [-ROAD_HALF - 0.4, -ROAD_HALF], (o, s) => kerbY(s) + 0.01),
       ])
     ),
     paintMat
   );
   kerb.frustumCulled = false;
+  kerb.receiveShadow = true;
   world.add(road, walk, kerb);
 
   /* Una griglia per sapere in fretta se un punto è vicino alla strada o a un
@@ -1022,9 +1084,12 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     }
   }
 
+  const facades = [];
   const facadeMaterial = (style) => {
-    const side = new THREE.MeshLambertMaterial({ map: facadeTexture(style, !isPhone) });
-    const top = new THREE.MeshLambertMaterial({ color: style === "lisbon" ? "#bd6a42" : "#cfc3ae" });
+    const map = facadeTexture(style, !isPhone);
+    facades.push([style, map]);
+    const side = surface({ map, roughness: 0.86 });
+    const top = surface({ color: "#a2603e" });
     return [side, side, top, top, side, side];
   };
   const pineShape = mergeGeometries(
@@ -1038,7 +1103,25 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const carShape = mergeGeometries(
     [new THREE.BoxGeometry(3.9, 0.7, 1.7), new THREE.BoxGeometry(2, 0.55, 1.5).translate(-0.2, 0.6, 0)].map((g) => g.toNonIndexed())
   );
-  const lit = () => new THREE.MeshLambertMaterial({ color: "#ffffff" });
+  const lit = () => surface({ color: "#ffffff" });
+  /* La chioma: palle di foglie fuse e deformate, non una pallina. */
+  const crown = (() => {
+    const spots = [[0, 0.1, 0, 0.82], [0.56, -0.12, 0.2, 0.62], [-0.5, -0.05, 0.3, 0.6], [0.12, -0.16, -0.58, 0.62], [-0.2, 0.42, -0.1, 0.56], [0.3, 0.36, 0.28, 0.5]];
+    const g = mergeVertices(mergeGeometries(spots.map(([x, y, z, r]) => {
+      const b = new THREE.IcosahedronGeometry(r, 1);
+      b.deleteAttribute("uv");
+      b.deleteAttribute("normal");
+      b.translate(x, y, z);
+      return b;
+    })));
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const n = 1 + Math.sin(p.getX(i) * 9.1 + p.getZ(i) * 5.3) * Math.cos(p.getY(i) * 7.7) * 0.11;
+      p.setXYZ(i, p.getX(i) * n, p.getY(i) * n, p.getZ(i) * n);
+    }
+    g.computeVertexNormals();
+    return g;
+  })();
   /* Il lampione di ghisa a tre lanterne, e il vaso di pietra. */
   const turned = (points, seg = 10) => new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), seg);
   const lampShape = mergeGeometries(
@@ -1053,7 +1136,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const vaseShape = turned([[0.3, 0], [0.34, 0.08], [0.12, 0.2], [0.12, 0.42], [0.42, 0.7], [0.58, 1.1], [0.62, 1.2], [0.5, 1.2]], 8);
   const shapes = {
     hill: [new THREE.IcosahedronGeometry(1, 2), toon("#ffffff")],
-    tree: [new THREE.IcosahedronGeometry(1, 1), toon("#ffffff")],
+    tree: [isPhone ? new THREE.IcosahedronGeometry(1, 1) : crown, lit()],
     trunk: [new THREE.CylinderGeometry(1, 1.2, 2, 6), toon("#ffffff")],
     pine: [pineShape, lit()],
     pineTrunk: [new THREE.CylinderGeometry(0.75, 1, 2, 6), lit()],
@@ -1084,20 +1167,36 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     world.add(mesh);
   }
 
+  /* Sulle facciate dipinte passa la grana delle scansioni, appena arrivano. */
+  const grainOf = (src, styles) => {
+    const img = new Image();
+    img.onload = () => {
+      for (const [style, map] of facades) if (styles(style)) weatherFacade(map, img, style.toLowerCase().includes("brick") ? 0.55 : 0.8);
+    };
+    img.src = src;
+  };
+  grainOf("textures/plaster.jpg", (s) => !s.toLowerCase().includes("brick"));
+  grainOf("textures/brick.jpg", (s) => s.toLowerCase().includes("brick"));
+
   /* I luoghi. */
   const vLocal = new THREE.Vector3();
   /* Sopra 1 di proposito: le tinte dei palazzi sono quelle vere, e la luce
      dell'illustrazione da sola le spegnerebbe. */
-  const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, color: new THREE.Color(1.28, 1.28, 1.28) });
+  const solidMat = surface({ vertexColors: true, side: THREE.DoubleSide, color: new THREE.Color(1.12, 1.12, 1.12) });
+  const wearMaps = { uBrick: { value: scan("brick", false) }, uStone: { value: scan("stone", false) }, uPlaster: { value: scan("plaster", false) } };
+  if (!isPhone) solidMat.defines = { ...solidMat.defines, WEAR_DETAIL: 1 };
   solidMat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, wearMaps);
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", `#include <common>\nattribute float aSurf;\nvarying float vSurf;\nvarying vec3 vWp;`)
       .replace("#include <begin_vertex>", `#include <begin_vertex>\nvSurf = aSurf;\nvWp = (modelMatrix * vec4(position, 1.0)).xyz;`);
     shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", `#include <common>\n${WEAR_HEAD}`)
-      .replace("#include <color_fragment>", `#include <color_fragment>\n${WEAR_BODY}`);
+      .replace("#include <common>", `#include <common>\n#define BRICK_MEAN 0.439\n#define STONE_MEAN 0.651\n#define PLASTER_MEAN 0.646\n${WEAR_HEAD}`)
+      .replace("#include <color_fragment>", `#include <color_fragment>\n${WEAR_BODY}`)
+      .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n${WEAR_RELIEF}`)
+      .replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>\nif (wearGlass) roughnessFactor = 0.08;`);
   };
-  const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   for (const b of beats) {
     b.entry = buildLandmark(b.landmark, solidMat, glowMat);
     const g = b.entry.group;
@@ -1131,15 +1230,6 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       }
     }
   }
-
-  /* La terra è disegnata senza luce: le ombre le riceve questo velo, che segue
-     il pulmino. */
-  const shade = new THREE.Mesh(new THREE.PlaneGeometry(760, 760), new THREE.ShadowMaterial({ color: "#2a2233", opacity: 0.34 }));
-  shade.rotation.x = -Math.PI / 2;
-  shade.position.y = 0.11;
-  shade.receiveShadow = true;
-  shade.renderOrder = 1;
-  world.add(shade);
 
   /* Lampioni: dischi morbidi additivi. */
   const lampGeo = new THREE.BufferGeometry();
@@ -1739,6 +1829,26 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   for (const k of SKY_COLORS) mix[k] = new THREE.Color();
   const skyLook = new THREE.Vector3();
 
+  /* Una luce d'ambiente per ogni cielo: i materiali fisici la riflettono. */
+  const paved = new THREE.Color("#b5ac98");
+  const skyLights = {};
+  let skyKey = null;
+  function bakeSkyLights() {
+    if (isPhone) return;
+    const pm = new THREE.PMREMGenerator(renderer);
+    const room = new THREE.Scene();
+    const dome = new THREE.Mesh(sky.geometry, sky.material);
+    dome.frustumCulled = false;
+    room.add(dome);
+    for (const [name, p] of Object.entries(palettes)) {
+      for (const k of SKY_COLORS) mix[k].copy(p[k]);
+      for (const k of SKY_NUMBERS) mix[k] = p[k];
+      applySky();
+      skyLights[name] = pm.fromScene(room, 0.03, 0.1, 100).texture;
+    }
+    pm.dispose();
+  }
+
   function currentSky(x) {
     let i = 0;
     while (i < skyStops.length - 2 && x >= skyStops[i + 1].u) i += 1;
@@ -1747,6 +1857,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     const t = b.u > a.u ? smooth(a.u, b.u, x) : 1;
     const A = palettes[a.key];
     const B = palettes[b.key];
+    skyKey = t < 0.5 ? a.key : b.key;
     for (const k of SKY_COLORS) mix[k].copy(A[k]).lerp(B[k], t);
     for (const k of SKY_NUMBERS) mix[k] = lerp(A[k], B[k], t);
   }
@@ -1760,21 +1871,20 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     skyLook.set(Math.sin(mix.sunAz) * Math.cos(mix.sunEl), Math.sin(mix.sunEl), -Math.cos(mix.sunAz) * Math.cos(mix.sunEl));
     skyUniforms.uSunDir.value.copy(skyLook);
     world.fog.color.copy(mix.low);
-    groundMat.color.copy(mix.ground).lerp(mix.road, 0.22).lerp(mix.hemi, 0.1);
-    roadMat.color.copy(mix.road).lerp(mix.hemi, 0.32).multiplyScalar(1.5);
-    walkMat.color.copy(mix.hemi).multiplyScalar(0.55 + mix.hemiI * 0.16);
+    groundMat.color.copy(mix.ground).lerp(paved, 0.62).multiplyScalar(1.7);
+    
     hemi.color.copy(mix.hemi);
     hemi.groundColor.copy(mix.hemiLow);
-    hemi.intensity = mix.hemiI;
+    hemi.intensity = mix.hemiI * (isPhone ? 0.9 : 0.5);
+    if (skyLights[skyKey]) world.environment = skyLights[skyKey];
     key.color.copy(mix.sun);
     key.intensity = mix.keyI;
     lampMat.opacity = mix.lamps;
     lamps.visible = mix.lamps > 0.02;
     glowMat.color.setScalar(0.28 + mix.lamps * 0.85);
-    sandMat.color.set("#ecd6a4").lerp(mix.low, 0.25).multiplyScalar(clamp(mix.hemiI / 2, 0.45, 1));
+    sandMat.color.set("#f0dcae").lerp(mix.low, 0.12);
     wetMat.color.copy(sandMat.color).lerp(mix.mid, 0.45).multiplyScalar(0.72);
-    paintMat.color.set("#cfc8b8").lerp(mix.road, 0.3);
-    if (sea) {
+        if (sea) {
       const su = sea.material.uniforms;
       su.uSun.value.copy(mix.sun);
       su.uFog.value.copy(mix.low);
@@ -2128,14 +2238,12 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     vC.set(skyLook.x, Math.max(skyLook.y, 0.5), skyLook.z).normalize();
     key.position.copy(pBus).addScaledVector(vC, 300);
     key.target.position.copy(pBus);
-    shade.position.x = pBus.x;
-    shade.position.z = pBus.z;
-    shade.material.opacity = 0.36 * clamp(mix.keyI / 1.2, 0.1, 1);
     /* Il mondo sta fermo: l'ombra si ricalcola ogni tanto, non a ogni fotogramma. */
     shadowTick = (shadowTick + 1) % (isPhone ? 10 : 4);
     if (!shadowTick) renderer.shadowMap.needsUpdate = true;
     airUniforms.uCamera.value.copy(camera.position);
     airUniforms.uTime.value = t;
+    skyUniforms.uTime.value = t;
     if (sea) {
       sea.material.uniforms.uTime.value = t;
       sea.material.uniforms.uCamera.value.copy(camera.position);
@@ -2386,6 +2494,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   }
 
   resize();
+  bakeSkyLights();
+  world.environmentIntensity = 0.42;
   currentSky(0);
   applySky();
   requestAnimationFrame((n) => {
