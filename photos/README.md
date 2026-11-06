@@ -12,12 +12,11 @@ essere pubblicata:
 
 1. Metti le foto in `private/photos/` con nomi come `33.jpeg` (estensione
    minuscola, non `.jpg`: il build ignora tutto il resto).
-2. L'ordine lo decide `chapters.js`: ogni capitolo elenca i numeri delle sue
-   foto. Se rinumeri, aggiorna quegli elenchi. Una foto che non è in nessun
-   capitolo finisce in fondo a "mondo".
+2. Il numero è l'ordine. `chapters.js` dice solo dove finisce ogni capitolo
+   (`from`, `to`) e davanti a quale foto sta ogni tappa (`before`).
 3. Esegui `node build.js` dalla cartella del progetto: cifra solo le foto
    nuove o cambiate e toglie quelle cancellate.
-4. Commit e push di `photos/` e `chapters.js`.
+4. Commit e push di `photos/`.
 
 ## Metadati
 

@@ -1,6 +1,6 @@
 // L'avvio: chiave, foto cifrate, musica, e la scelta tra il viaggio 3D e la
 // versione semplice (movimento ridotto, oppure WebGL assente).
-import { CHAPTERS, OVERFLOW_CHAPTER, SONG, WALL_API } from "./chapters.js";
+import { CHAPTERS, SONG, WALL_API } from "./chapters.js";
 import { createBooth } from "./booth.js";
 import { createMusic } from "./music.js";
 import { createWall } from "./wall.js";
@@ -76,18 +76,14 @@ async function decryptPhoto(key, n) {
   }
 }
 
-/* Solo le foto che esistono davvero; quelle nuove, non ancora in nessun
-   capitolo, si accodano al capitolo di riserva. */
+/* Ogni foto va nel capitolo del suo numero; quelle fuori da ogni intervallo
+   finiscono nell'ultimo, così una foto nuova non sparisce mai. */
 function arrangeChapters(numbers) {
-  const known = new Set(numbers);
-  const placed = new Set();
-  const chapters = CHAPTERS.map((c) => {
-    const photos = c.photos.filter((n) => known.has(n) && !placed.has(n));
-    photos.forEach((n) => placed.add(n));
-    return { ...c, photos };
-  });
-  const extra = numbers.filter((n) => !placed.has(n));
-  chapters.find((c) => c.id === OVERFLOW_CHAPTER).photos.push(...extra);
+  const chapters = CHAPTERS.map((c) => ({ ...c, photos: [] }));
+  for (const n of [...numbers].sort((a, b) => a - b)) {
+    const home = chapters.find((c) => n >= c.from && n <= c.to) ?? chapters[chapters.length - 1];
+    home.photos.push(n);
+  }
   return chapters.filter((c) => c.photos.length);
 }
 

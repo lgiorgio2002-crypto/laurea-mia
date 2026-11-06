@@ -1,10 +1,12 @@
 // Il copione del viaggio. Tutto ciò che si cambia a mano sta qui.
 //
-// photos: i numeri delle foto, nell'ordine in cui compaiono. Una foto nuova
-//         che non è in nessun capitolo finisce in fondo a "mondo".
-// sky:    i due momenti della giornata tra cui scorre il capitolo (PALETTES).
-// grade:  la pellicola delle foto: 0 colore pieno, 1 stampa antica.
-// neon:   quanto le foto risentono delle luci della notte.
+// from, to: le foto del capitolo, per numero. L'ordine è quello dei numeri.
+// stops:    le tappe. before è la foto davanti a cui il pulmino rallenta e la
+//           camera mostra il luogo (nome in landmarks.js). sky è il momento
+//           della giornata che comincia lì (PALETTES).
+// scenery:  il paesaggio lungo la strada, tra una tappa e l'altra.
+// grade:    la pellicola delle foto: 0 colore pieno, 1 stampa antica.
+// neon:     quanto le foto risentono delle luci della notte.
 
 // Una canzone per tutto il viaggio. start ed end sono in secondi; end: null =
 // fino alla fine. Chi non è collegato a Spotify sente l'anteprima di 30 secondi
@@ -15,67 +17,76 @@ export const SONG = { uri: "spotify:track:7wFEzF8FbofVlQS1OcbghM", start: 0, end
 // foto resta solo sul telefono di chi l'ha scattata.
 export const WALL_API = "https://laurea-wall.laurea-mia.workers.dev";
 
+// La scritta finale, fatta con le foto. Una riga per voce dell'elenco: su schermo
+// largo e su schermo stretto le parole vanno a capo in modo diverso.
+export const THANKS = {
+  wide: ["GRAZIE", "DI ESSERCI"],
+  narrow: ["GRAZIE", "DI", "ESSERCI"],
+};
+
 export const CHAPTERS = [
   {
-    id: "infanzia",
-    photos: [1, 2, 3, 4],
-    sky: ["dawn", "sunrise"],
-    scenery: "meadow",
+    id: "casa",
+    from: 1,
+    to: 4,
+    scenery: "romeStreet",
     particles: "dust",
     grade: 0.8,
     neon: 0,
+    stops: [{ landmark: "homeStreet", before: 1, sky: "morning" }],
   },
   {
-    id: "casa",
-    photos: [5, 6, 7],
-    sky: ["morning", "afternoon"],
-    scenery: "town",
+    id: "melfi",
+    from: 5,
+    to: 9,
+    scenery: "melfi",
     particles: "pollen",
-    grade: 0.25,
+    grade: 0.2,
     neon: 0,
+    stops: [{ landmark: "melfiStreet", before: 5, sky: "cloudy" }],
   },
   {
-    id: "amici",
-    photos: [10, 12, 13, 14, 15, 16, 17],
-    sky: ["dusk", "night"],
-    scenery: "city",
-    particles: "bokeh",
-    grade: 0,
-    neon: 1,
-  },
-  {
-    id: "laurea",
-    photos: [18, 19, 20, 21],
-    sky: ["night", "morning"],
-    scenery: "garden",
+    id: "roma",
+    from: 10,
+    to: 23,
+    scenery: "romeCity",
     particles: "laurel",
     grade: 0,
-    neon: 0.2,
+    neon: 0.25,
+    stops: [
+      { landmark: "luissVilla", before: 10, sky: "morning" },
+      { landmark: "luissHouse", before: 12, sky: "noon" },
+      { landmark: "aula", before: 14, sky: "afternoon" },
+      { landmark: "tiber", before: 16, sky: "sunset", water: true },
+      { landmark: "colosseum", before: 18, sky: "night" },
+      { landmark: "pantheon", before: 20, sky: "morning" },
+      { landmark: "tower", before: 23, sky: "afternoon" },
+    ],
   },
   {
-    id: "mondo",
-    photos: [11, 8, 23, 24, 25, 26, 29, 27, 28, 30],
-    sky: ["noon", "sunset"],
-    scenery: "coast",
+    id: "lisbona",
+    from: 24,
+    to: 99,
+    scenery: "lisbon",
     particles: "spray",
     grade: 0,
     neon: 0,
-  },
-  {
-    id: "traguardo",
-    photos: [31, 32],
-    sky: ["sunrise", "gold"],
-    scenery: "finish",
-    particles: "confetti",
-    grade: 0,
-    neon: 0,
+    stops: [
+      { landmark: "tram", before: 24, sky: "noon" },
+      { landmark: "belem", before: 26, sky: "afternoon", water: true },
+      { landmark: "comercio", before: 27, sky: "dusk" },
+      { landmark: "nova", before: 29, sky: "morning", water: true, beach: true },
+      { landmark: "carcavelos", before: 31, sky: "gold", water: true, beach: true },
+      { landmark: "sunsetBeach", before: 32, sky: "sunset", water: true, beach: true },
+    ],
   },
 ];
 
-// Il capitolo che accoglie le foto non assegnate.
-export const OVERFLOW_CHAPTER = "mondo";
+// Il cielo del finale, oltre il traguardo.
+export const FINALE_SKY = "gold";
 
 export const PALETTES = {
+  cloudy: { top: "#8fa3b8", mid: "#c6cfd4", low: "#e6e6dc", ground: "#8f9a5c", road: "#5e5b58", sun: "#fff4dc", sunEl: 0.5, sunAz: 0.3, hemi: "#f2f2ee", hemiLow: "#a39c86", hemiI: 2.2, keyI: 0.8, stars: 0, lamps: 0 },
   dawn: { top: "#6d7fb8", mid: "#f4b8b0", low: "#ffd9b8", ground: "#c9b48c", road: "#574d50", sun: "#fff1cf", sunEl: 0.07, sunAz: 0.3, hemi: "#ffd9d0", hemiLow: "#a8859c", hemiI: 1.7, keyI: 0.9, stars: 0.25, lamps: 0 },
   sunrise: { top: "#79b4e2", mid: "#ffd9a0", low: "#ffe9b8", ground: "#c7c27a", road: "#5a5048", sun: "#fff4d0", sunEl: 0.16, sunAz: 0.25, hemi: "#fff0d0", hemiLow: "#c9a56e", hemiI: 2, keyI: 1.3, stars: 0, lamps: 0 },
   morning: { top: "#5fb3ea", mid: "#a9dcf2", low: "#e6f3e0", ground: "#a9c25a", road: "#4d4842", sun: "#fffbe6", sunEl: 0.42, sunAz: -0.2, hemi: "#ffffff", hemiLow: "#d8c98a", hemiI: 2.1, keyI: 1.5, stars: 0, lamps: 0 },

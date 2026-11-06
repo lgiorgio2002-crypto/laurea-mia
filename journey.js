@@ -4,15 +4,18 @@
 // riavvolge il film. Solo la vita di fondo (aria, onde, foto che respirano) va
 // avanti da sola.
 import * as THREE from "three";
-import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { PALETTES, PARTICLES } from "./chapters.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { createBus } from "./bus.js";
+import { FINALE_SKY, PALETTES, PARTICLES, THANKS } from "./chapters.js";
+import { buildLandmark, facadeTexture, LANDMARKS } from "./landmarks.js";
 
-const SCROLL_VH_PER_UNIT = 78;
-const WORLD_PER_UNIT = 34;
+const SCROLL_VH_PER_UNIT = 62;
+const WORLD_PER_UNIT = 30;
 const FINALE_UNITS = 4.5;
 const INTRO_UNITS = 1.4;
-const GAP_UNITS = 1.3;
+/* Quanto dura una tappa: il pulmino rallenta e la camera mostra il luogo. */
+const BEAT_UNITS = 1.9;
 /* Il muro finale sta poco oltre il punto in cui si ferma il pulmino. */
 const WALL_AHEAD = 12;
 const WALL_LIFT = 5.5;
@@ -38,7 +41,7 @@ function roadX(s) {
   return 14 * Math.sin(s * 0.006) + 6 * Math.sin(s * 0.017 + 1);
 }
 function roadY(s) {
-  return 1.6 * Math.sin(s * 0.009) + 0.7 * Math.sin(s * 0.023);
+  return 0.5 * Math.sin(s * 0.009) + 0.2 * Math.sin(s * 0.023);
 }
 function roadPoint(s, out = new THREE.Vector3()) {
   return out.set(roadX(s), roadY(s), -s);
@@ -50,28 +53,40 @@ function roadDir(s, out = new THREE.Vector3()) {
 /* ---------- Timeline ---------- */
 function buildTimeline(chapters) {
   const prints = [];
+  const beats = [];
   let u = INTRO_UNITS;
+
+  const addBeat = (stop, chapter) => {
+    const spec = LANDMARKS[stop.landmark];
+    beats.push({ ...stop, spec, chapter, u0: u, u1: u + BEAT_UNITS, side: spec.side || 1, through: !!spec.through });
+    u += BEAT_UNITS;
+  };
+
   chapters.forEach((chapter, index) => {
     chapter.index = index;
     chapter.u0 = u;
-    u += index ? GAP_UNITS : 0.2;
-    chapter.photosU = u;
+    const pending = [...chapter.stops];
+    chapter.photosU = null;
     chapter.photos.forEach((n, i) => {
+      while (pending.length && n >= pending[0].before) addBeat(pending.shift(), index);
+      chapter.photosU ??= u;
       prints.push({ n, chapter: index, a: u, side: i % 2 ? -1 : 1 });
       u += 1;
     });
+    /* Le tappe dopo l'ultima foto si percorrono lo stesso. */
+    while (pending.length) addBeat(pending.shift(), index);
+    chapter.photosU ??= u;
     chapter.u1 = u;
   });
   const finale = u;
   const total = u + FINALE_UNITS;
 
-  /* Il pulmino rallenta davanti a ogni foto e accelera tra i capitoli. */
+  /* Il pulmino rallenta davanti a ogni foto e allunga verso la tappa dopo. */
   function pace(x) {
     if (x < 0.5) return 0;
     if (x < INTRO_UNITS) return smooth(0.5, INTRO_UNITS, x) * 1.2;
     if (x > finale) return 1 - smooth(finale, finale + 2.4, x);
-    const chapter = chapters.find((c) => x >= c.u0 && x < c.u1);
-    if (chapter && x < chapter.photosU) return 1.9;
+    if (beats.some((b) => x >= b.u0 && x < b.u1)) return 1.25;
     const local = x - Math.floor(x);
     return 0.55 + 0.75 * Math.abs(local * 2 - 1);
   }
@@ -94,16 +109,28 @@ function buildTimeline(chapters) {
   prints.forEach((p) => {
     p.s = distanceAt(p.a + 0.5);
   });
-  return { prints, finale, total, distanceAt, end: distanceAt(total) };
+  beats.forEach((b) => {
+    b.s0 = distanceAt(b.u0);
+    b.s1 = distanceAt(b.u1);
+    b.s = distanceAt((b.u0 + b.u1) / 2 + 0.1);
+  });
+  /* A parte: serve la posizione della tappa dopo. */
+  beats.forEach((b, i) => {
+    b.zoneEnd = beats[i + 1] ? beats[i + 1].s0 : distanceAt(total);
+  });
+  return { prints, beats, finale, total, distanceAt, end: distanceAt(total) };
 }
 
-/* Punti fermi del cielo lungo la timeline. */
-function buildSkyStops(chapters, total) {
-  const stops = [{ u: 0, key: chapters[0].sky[0] }];
-  chapters.forEach((c) => {
-    stops.push({ u: c.photosU, key: c.sky[0] }, { u: c.u1 - 0.2, key: c.sky[1] });
-  });
-  stops.push({ u: total, key: chapters[chapters.length - 1].sky[1] });
+/* Il cielo cambia durante le tappe, mentre si guarda il luogo. */
+function buildSkyStops(beats, finale, total) {
+  const first = beats[0].sky;
+  const stops = [{ u: 0, key: first }];
+  let previous = first;
+  for (const b of beats) {
+    stops.push({ u: b.u0, key: previous }, { u: b.u1, key: b.sky });
+    previous = b.sky;
+  }
+  stops.push({ u: finale, key: previous }, { u: finale + 1.6, key: FINALE_SKY }, { u: total, key: FINALE_SKY });
   return stops;
 }
 
@@ -361,12 +388,39 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+const TILE_VERT = /* glsl */ `
+attribute vec2 aCell;
+varying vec2 vUv;
+varying vec2 vCell;
+void main() {
+  vUv = uv;
+  vCell = aCell;
+  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+}`;
+
+const TILE_FRAG = /* glsl */ `
+uniform sampler2D uAtlas;
+uniform float uCells;
+varying vec2 vUv;
+varying vec2 vCell;
+void main() {
+  /* Cornice sottile: a questa misura è lei a farle leggere come stampe. */
+  vec2 p = (vUv - 0.5) / 0.86 + 0.5;
+  vec3 c = vec3(1.0, 0.973, 0.882);
+  if (p.x > 0.0 && p.x < 1.0 && p.y > 0.0 && p.y < 1.0) {
+    vec2 uv = (vCell + p) / uCells;
+    c = texture2D(uAtlas, vec2(uv.x, 1.0 - uv.y + 0.0)).rgb;
+  }
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
+}`;
+
 /* ---------- Il mondo ---------- */
 export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onReady }) {
   const timeline = buildTimeline(chapters);
-  const { prints, finale, total, distanceAt, end } = timeline;
+  const { prints, beats, finale, total, distanceAt, end } = timeline;
   const palettes = preparePalettes();
-  const skyStops = buildSkyStops(chapters, total);
+  const skyStops = buildSkyStops(beats, finale, total);
   const isPhone = Math.min(window.innerWidth, window.innerHeight) < 700;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isPhone, powerPreference: "high-performance" });
@@ -405,16 +459,22 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   world.add(sky);
 
   /* Terra e strada */
-  const coast = chapters.find((c) => c.scenery === "coast");
-  const seaAmount = (s) => (coast ? smooth(coast.s0 - 40, coast.s0 + 30, s) * (1 - smooth(coast.s1 - 30, coast.s1 + 40, s)) : 0);
+  /* Acqua a destra della strada: il fiume, l'estuario, l'oceano. */
+  const waterZones = beats.filter((b) => b.water).map((b) => ({ s0: b.s0 - 24, s1: b.landmark === "tiber" || b.landmark === "belem" ? b.s1 + 34 : b.zoneEnd + 60, beach: !!b.beach }));
+  const seaAmount = (s) => Math.max(0, ...waterZones.map((z) => smooth(z.s0 - 30, z.s0 + 10, s) * (1 - smooth(z.s1 - 10, z.s1 + 30, s))));
+  const beachAmount = (s) => Math.max(0, ...waterZones.filter((z) => z.beach).map((z) => smooth(z.s0 - 30, z.s0 + 10, s) * (1 - smooth(z.s1 - 10, z.s1 + 30, s))));
+  const shoreDrop = (o, s) => {
+    const steep = o > 12 ? -11 * smooth(12, 20, o) : 0;
+    const gentle = o > 8 ? -11 * smooth(8, 42, o) : 0;
+    return lerp(steep, gentle, beachAmount(s)) * seaAmount(s);
+  };
   const lastS = end + 520;
   const firstS = -160;
 
   const groundMat = flat(0xffffff);
   const ground = new THREE.Mesh(
-    ribbon(firstS, lastS, 5, [-520, -130, -34, -6.5, 6.5, 13, 20, 34, 130, 520], (o, s) => {
-      const drop = o > 13 ? -11 * seaAmount(s) * smooth(13, 20, o) : 0;
-      return -0.07 + drop;
+    ribbon(firstS, lastS, 5, [-520, -130, -34, -6.5, 6.5, 8, 12, 16, 20, 26, 34, 42, 130, 520], (o, s) => {
+      return -0.07 + shoreDrop(o, s);
     }),
     groundMat
   );
@@ -431,36 +491,40 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   [lineL, lineR, centre].forEach((m) => (m.frustumCulled = false));
   world.add(road, lineL, lineR, centre);
 
-  /* Mare */
-  let sea = null;
-  if (coast) {
-    const midS = (coast.s0 + coast.s1) / 2;
-    const length = coast.s1 - coast.s0 + 40;
-    sea = new THREE.Mesh(
-      new THREE.PlaneGeometry(1100, length, 80, 60),
-      new THREE.ShaderMaterial({
-        vertexShader: SEA_VERT,
-        fragmentShader: SEA_FRAG,
-        uniforms: {
-          uTime: { value: 0 },
-          uDeep: { value: new THREE.Color("#1a6fb0") },
-          uShallow: { value: new THREE.Color("#58c4d8") },
-          uSun: { value: new THREE.Color() },
-          uFog: { value: new THREE.Color() },
-          uCamera: { value: new THREE.Vector3() },
-          uFogNear: { value: 70 },
-          uFogFar: { value: 330 },
-        },
-      })
-    );
-    sea.rotation.x = -Math.PI / 2;
-    sea.position.set(560, -4.2, -midS);
-    sea.frustumCulled = false;
-    world.add(sea);
+  /* Sabbia */
+  const sandMat = flat("#ecd6a4");
+  for (const z of waterZones.filter((w) => w.beach)) {
+    const sand = new THREE.Mesh(ribbon(z.s0, z.s1, 5, [6.4, 8, 12, 16, 20, 26, 34, 42], (o, s) => -0.03 + shoreDrop(o, s)), sandMat);
+    sand.frustumCulled = false;
+    world.add(sand);
   }
 
-  /* Paesaggio: istanze ripartite per capitolo. */
-  const instances = { hill: [], tree: [], trunk: [], cypress: [], house: [], roof: [], tower: [], post: [] };
+  /* Acqua */
+  const seaMat = new THREE.ShaderMaterial({
+    vertexShader: SEA_VERT,
+    fragmentShader: SEA_FRAG,
+    uniforms: {
+      uTime: { value: 0 },
+      uDeep: { value: new THREE.Color("#1a6fb0") },
+      uShallow: { value: new THREE.Color("#58c4d8") },
+      uSun: { value: new THREE.Color() },
+      uFog: { value: new THREE.Color() },
+      uCamera: { value: new THREE.Vector3() },
+      uFogNear: { value: 70 },
+      uFogFar: { value: 330 },
+    },
+  });
+  const sea = waterZones.length ? { material: seaMat } : null;
+  for (const z of waterZones) {
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(1200, z.s1 - z.s0 + 40, 60, Math.ceil((z.s1 - z.s0) / 10)), seaMat);
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.set(540, -4.2, -(z.s0 + z.s1) / 2);
+    plane.frustumCulled = false;
+    world.add(plane);
+  }
+
+  /* Paesaggio: istanze ripartite per tratto di strada. */
+  const instances = { hill: [], tree: [], trunk: [], pine: [], pineTrunk: [], hedge: [], post: [], car: [], salmon: [], coral: [], ochre: [], rust: [], lisbon: [] };
   const lampPoints = [];
   const dummy = new THREE.Object3D();
   const rng = mulberry(2026);
@@ -476,129 +540,152 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   }
 
   const pick = (list) => list[Math.floor(rng() * list.length)];
+  const heading = (s) => {
+    const d = roadDir(s, new THREE.Vector3());
+    return Math.atan2(-d.x, -d.z);
+  };
+  /* I luoghi si tengono attorno un po' di vuoto, altrimenti non si vedono. */
+  const blocked = (s, side) => beats.some((b) => Math.abs(s - b.s) < (b.through ? 44 : 62) && (b.through || !b.spec.side || b.side === side));
+  const nearStop = (s) => beats.some((b) => Math.abs(s - b.s) < 78);
+  const wet = (s, side) => side > 0 && seaAmount(s) > 0.01;
 
-  function hills(c, colors, every = 16, min = 16) {
-    for (let s = c.s0 - 30; s < c.s1 + 30; s += every) {
+  function hills(s0, s1, colors, every = 15) {
+    for (let s = s0; s < s1; s += every) {
       const side = rng() < 0.5 ? -1 : 1;
-      if (c.scenery === "coast" && side > 0) continue;
-      const w = 22 + rng() * 44;
-      const o = side * (min + w * 1.05 + rng() * 170);
-      const h = 8 + rng() * 22;
-      put("hill", s, o, -1, w, h, w, pick(colors), rng() * 6);
+      if (wet(s, side) || blocked(s, side)) continue;
+      const w = 22 + rng() * 40;
+      put("hill", s, side * (46 + w + rng() * 150), -1, w, 7 + rng() * 18, w, pick(colors), rng() * 6);
     }
   }
 
-  function trees(c, colors, every, min = 10, max = 60) {
-    for (let s = c.s0 - 20; s < c.s1 + 20; s += every) {
+  function trees(s0, s1, colors, every, min = 11, max = 44) {
+    for (let s = s0; s < s1; s += every) {
       const side = rng() < 0.5 ? -1 : 1;
-      if (c.scenery === "coast" && side > 0) continue;
+      if (wet(s, side) || blocked(s, side) || nearStop(s)) continue;
       const o = side * (min + rng() * rng() * (max - min));
-      const k = 1.1 + rng() * 1.3;
-      put("trunk", s, o, 1.2 * k, 0.3 * k, 1.3 * k, 0.3 * k, "#6b4a33");
-      put("tree", s, o, 3.2 * k, 1.9 * k, 1.8 * k, 1.9 * k, pick(colors), rng() * 6);
+      const k = 1.1 + rng() * 1.1;
+      put("trunk", s, o, 1.2 * k, 0.26 * k, 1.3 * k, 0.26 * k, "#6b4a33");
+      put("tree", s, o, 3.3 * k, 1.9 * k, 1.8 * k, 1.9 * k, pick(colors), rng() * 6);
     }
   }
 
-  function cypresses(c, every) {
-    for (let s = c.s0; s < c.s1; s += every) {
-      const side = rng() < 0.5 ? -1 : 1;
-      const o = side * (9.5 + rng() * rng() * 46);
-      const k = 1 + rng() * 0.9;
-      put("cypress", s, o, 3.6 * k, 0.95 * k, 4 * k, 0.95 * k, pick(["#2f5d3a", "#376b45", "#28503a"]));
+  function pines(s0, s1, every, sides = [1, -1], offset = 8.5) {
+    for (let s = s0; s < s1; s += every) {
+      const side = pick(sides);
+      if (wet(s, side) || blocked(s, side) || nearStop(s)) continue;
+      const h = 10 + rng() * 5;
+      const o = side * (offset + rng() * 2);
+      put("pineTrunk", s, o, h / 2, 0.3, h / 2, 0.3, "#6b4a33");
+      put("pine", s, o, h, 1, 1, 1, pick(["#2f5d3a", "#35673f", "#2a5232"]), rng() * 6);
     }
   }
 
-  function houses(c, every) {
-    for (let s = c.s0; s < c.s1; s += every) {
-      const side = rng() < 0.5 ? -1 : 1;
-      const o = side * (13 + rng() * 34);
-      const w = 4 + rng() * 3.5;
-      const h = 2.8 + rng() * 3;
-      const d = 4 + rng() * 3.5;
-      const rot = rng() * 0.6 - 0.3;
-      put("house", s, o, h / 2, w, h, d, pick(["#fff0d0", "#ffd9a8", "#f9c79a", "#f2e6c9"]), rot);
-      put("roof", s, o, h + 1.05, w * 0.82, 2.1, d * 0.82, pick(["#c95b3a", "#b84b34", "#d6703f"]), rot + Math.PI / 4);
-    }
-  }
-
-  function city(c) {
-    for (let s = c.s0 - 10; s < c.s1 + 10; s += 7.5) {
-      for (const side of [-1, 1]) {
-        const o = side * (19 + rng() * 34);
-        const w = 7 + rng() * 7;
-        const h = 9 + rng() * rng() * 46;
-        put("tower", s + rng() * 3, o, h / 2, w, h, w, pick(["#23264f", "#2b2a5e", "#1c1f47", "#33285f"]));
+  function buildings(s0, s1, styles, sides = [1, -1], min = 19, every = 19, floors = [16, 24]) {
+    for (const side of sides) {
+      for (let s = s0; s < s1; s += every) {
+        if (wet(s, side) || blocked(s, side) || beats.some((b) => Math.abs(s - b.s) < 50)) continue;
+        const w = every - 1;
+        const h = floors[0] + rng() * (floors[1] - floors[0]);
+        put(pick(styles), s, side * (min + 8), h / 2, w, h, 14, "#ffffff", heading(s));
       }
     }
-    for (let s = c.s0; s < c.s1; s += 15) {
-      for (const side of [-1, 1]) {
-        const o = side * 5.2;
-        put("post", s, o, 2.8, 0.06, 2.8, 0.06, "#141433");
+  }
+
+  function cars(s0, s1, every, sides = [1]) {
+    for (let s = s0; s < s1; s += every) {
+      const side = pick(sides);
+      if (rng() < 0.3 || blocked(s, side) || wet(s, side) || nearStop(s)) continue;
+      put("car", s, side * 5.6, 0.62, 1, 1, 1, pick(["#8b8f94", "#4c5660", "#e9e9ea", "#a33434", "#23272d", "#23305f"]), heading(s));
+    }
+  }
+
+  function streetLamps(s0, s1, every, sides = [1, -1], offset = 5.2) {
+    for (let s = s0; s < s1; s += every) {
+      for (const side of sides) {
+        if (blocked(s, side) || wet(s, side) || nearStop(s)) continue;
+        put("post", s, side * offset, 3.3, 0.07, 3.3, 0.07, "#3a3d44");
         const p = roadPoint(s, new THREE.Vector3());
         const d = roadDir(s, new THREE.Vector3());
-        lampPoints.push(p.x - d.z * (o - side * 0.8), p.y + 5.7, p.z + d.x * (o - side * 0.8));
+        const o = side * (offset - 0.8);
+        lampPoints.push(p.x - d.z * o, p.y + 6.7, p.z + d.x * o);
       }
     }
   }
 
   for (const c of chapters) {
-    if (c.scenery === "meadow") {
-      hills(c, ["#d6b98f", "#c9a98d", "#e0c49a", "#b9a08f"], 13);
-      trees(c, ["#c4b37c", "#d9b98e", "#b6a877"], 9);
+    const a = c.s0 - 20;
+    const b = c.s1 + 20;
+    if (c.scenery === "romeStreet") {
+      buildings(a, b, ["salmon", "salmon", "ochre"]);
+      pines(a, b, 17);
+      cars(a, b, 6.5, [1, -1]);
+      streetLamps(a, b, 30);
+      hills(a, b, ["#b9a98f"], 22);
     }
-    if (c.scenery === "town") {
-      hills(c, ["#8cae55", "#9db95a", "#7ea050"], 13);
-      trees(c, ["#6d9e43", "#83b04d", "#5a8c3c"], 12);
-      cypresses(c, 8);
-      houses(c, 10);
+    if (c.scenery === "melfi") {
+      buildings(a, b, ["coral"], [1], 17, 20, [11, 15]);
+      /* Dall'altro lato la ferrovia, con la siepe davanti. */
+      const ballast = new THREE.Mesh(ribbon(a, b, 5, [-13.5, -9], () => 0.04), flat("#8a8378"));
+      const rails = [[-12.4, -12.26], [-10.6, -10.46]].map((o) => new THREE.Mesh(ribbon(a, b, 5, o, () => 0.14), flat("#4e4a46")));
+      [ballast, ...rails].forEach((m) => {
+        m.frustumCulled = false;
+        world.add(m);
+      });
+      for (let s = a; s < b; s += 2.6) if (!nearStop(s)) put("hedge", s, -7.2 - rng() * 0.6, 0.5, 1.5 + rng(), 0.9 + rng() * 0.8, 1.7, pick(["#5d8a3e", "#4f7d38", "#6c9a46"]));
+      for (let s = a; s < b; s += 9) {
+        const k = 2 + rng() * 1.6;
+        const o = -16 - rng() * 20;
+        put("trunk", s, o, 1.2 * k, 0.28 * k, 1.3 * k, 0.28 * k, "#5a4030");
+        put("tree", s, o, 3.3 * k, 2 * k, 2 * k, 2 * k, pick(["#3f6e3a", "#35623a", "#4b7d40"]), rng() * 6);
+      }
+      streetLamps(a, b, 26, [-1], 5.6);
+      cars(a, b, 12, [1]);
+      hills(a, b, ["#7f9652", "#8ca35a", "#6e8a4e"], 12);
     }
-    if (c.scenery === "city") city(c);
-    if (c.scenery === "garden") {
-      hills(c, ["#4d7f50", "#5e9358", "#3f6e4c"], 13);
-      cypresses(c, 5);
-      trees(c, ["#4c8a4c", "#5f9c50", "#3e7a46"], 11);
+    if (c.scenery === "romeCity") {
+      buildings(a, b, ["ochre", "rust", "ochre"]);
+      pines(a, b, 21);
+      trees(a, b, ["#4f8a46", "#5f9c50"], 17);
+      streetLamps(a, b, 30);
+      cars(a, b, 11, [1, -1]);
+      hills(a, b, ["#a9a07c", "#8fa066"], 18);
     }
-    if (c.scenery === "coast") {
-      hills(c, ["#d9c28a", "#cfae7a", "#b8a070"], 11);
-      trees(c, ["#6f9c50", "#82a852"], 16);
-    }
-    if (c.scenery === "finish") {
-      hills(c, ["#f0c23a", "#e8ad2c", "#f4cf55"], 11);
-      trees(c, ["#e4572e", "#f7c51e", "#fff0a8"], 9);
+    if (c.scenery === "lisbon") {
+      buildings(a, b, ["lisbon"], [1, -1], 15, 19, [13, 19]);
+      trees(a, b, ["#6f9c50", "#82a852"], 22);
+      streetLamps(a, b, 24);
+      hills(a, b, ["#d9c28a", "#cfae7a", "#b8a070"], 12);
     }
   }
 
+  const facadeMaterial = (style) => {
+    const side = new THREE.MeshLambertMaterial({ map: facadeTexture(style) });
+    const top = new THREE.MeshLambertMaterial({ color: "#cfc3ae" });
+    return [side, side, top, top, side, side];
+  };
+  const pineShape = mergeGeometries(
+    [[0, 0, 0, 4.2], [2.8, -0.5, 1, 3], [-2.6, -0.3, -1, 3.2], [0.6, -0.6, 2.8, 2.8], [-0.8, -0.2, -2.7, 2.9]].map(([x, y, z, r]) => {
+      const g = new THREE.IcosahedronGeometry(r, 1);
+      g.scale(1, 0.48, 1);
+      g.translate(x, y, z);
+      return g;
+    })
+  );
+  const carShape = mergeGeometries(
+    [new THREE.BoxGeometry(3.9, 0.7, 1.7), new THREE.BoxGeometry(2, 0.55, 1.5).translate(-0.2, 0.6, 0)].map((g) => g.toNonIndexed())
+  );
+  const lit = () => new THREE.MeshLambertMaterial({ color: "#ffffff" });
   const shapes = {
     hill: [new THREE.IcosahedronGeometry(1, 2), toon("#ffffff")],
     tree: [new THREE.IcosahedronGeometry(1, 1), toon("#ffffff")],
     trunk: [new THREE.CylinderGeometry(1, 1.2, 2, 6), toon("#ffffff")],
-    cypress: [new THREE.ConeGeometry(1, 2, 7), toon("#ffffff")],
-    house: [new THREE.BoxGeometry(1, 1, 1), toon("#ffffff")],
-    roof: [new THREE.ConeGeometry(1, 1, 4), toon("#ffffff")],
-    tower: [new THREE.BoxGeometry(1, 1, 1), null],
+    pine: [pineShape, lit()],
+    pineTrunk: [new THREE.CylinderGeometry(0.75, 1, 2, 6), lit()],
+    hedge: [new THREE.IcosahedronGeometry(1, 1), lit()],
     post: [new THREE.CylinderGeometry(1, 1, 2, 5), flat("#ffffff")],
+    car: [carShape, lit()],
   };
-
-  /* Finestre della città: accese a caso, una texture sola. */
-  function windowTexture() {
-    const c = document.createElement("canvas");
-    c.width = c.height = 256;
-    const g = c.getContext("2d");
-    g.fillStyle = "#ffffff";
-    g.fillRect(0, 0, 256, 256);
-    const lit = ["#ffd98a", "#ff8ac4", "#7fd4ff", "#ffe9a8"];
-    for (let y = 0; y < 16; y++) {
-      for (let x = 0; x < 8; x++) {
-        g.fillStyle = rng() < 0.42 ? pick(lit) : "#3a3a6a";
-        g.fillRect(x * 32 + 8, y * 16 + 4, 16, 8);
-      }
-    }
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 2;
-    return t;
-  }
-  shapes.tower[1] = new THREE.MeshBasicMaterial({ color: "#ffffff", map: windowTexture() });
+  for (const style of ["salmon", "coral", "ochre", "rust", "lisbon"]) shapes[style] = [new THREE.BoxGeometry(1, 1, 1), facadeMaterial(style)];
 
   for (const [kind, list] of Object.entries(instances)) {
     if (!list.length) continue;
@@ -609,6 +696,23 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     });
     mesh.frustumCulled = false;
     world.add(mesh);
+  }
+
+  /* I luoghi. */
+  const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  for (const b of beats) {
+    b.entry = buildLandmark(b.landmark, solidMat, glowMat);
+    const g = b.entry.group;
+    const p = roadPoint(b.s);
+    const d = roadDir(b.s);
+    const rightX = -d.z;
+    const rightZ = d.x;
+    g.position.set(p.x + rightX * b.side * b.spec.offset, p.y, p.z + rightZ * b.side * b.spec.offset);
+    /* Il +z del luogo guarda la strada; chi si attraversa sta in asse. */
+    g.rotation.y = b.through ? Math.atan2(-d.x, -d.z) + Math.PI / 2 : Math.atan2(-rightX * b.side, -rightZ * b.side);
+    b.centre = g.position.clone().setY(g.position.y + b.spec.look);
+    world.add(g);
   }
 
   /* Lampioni: dischi morbidi additivi. */
@@ -707,133 +811,12 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   }
 
   /* ---------- Il pulmino ---------- */
-  const COLORS = { yellow: "#f7c51e", cream: "#fff8e1", ink: "#2b2622", asphalt: "#3a342f", glass: "#bfe3f2", red: "#e4572e", lamp: "#fff6c2", hub: "#d9d2c3" };
-  const mats = {
-    yellow: toon(COLORS.yellow),
-    cream: toon(COLORS.cream),
-    glass: toon(COLORS.glass),
-    red: toon(COLORS.red),
-    lamp: toon(COLORS.lamp, { emissive: COLORS.lamp, emissiveIntensity: 0.8 }),
-    hub: toon(COLORS.hub),
-    tyre: toon(COLORS.asphalt),
-    ink: flat(COLORS.ink),
-    outline: flat(COLORS.ink, { side: THREE.BackSide }),
-  };
-  function batcher() {
-    const parts = {};
-    return {
-      add(key_, g) {
-        (parts[key_] ||= []).push(g.index ? g.toNonIndexed() : g);
-      },
-      build(target) {
-        for (const [k, list] of Object.entries(parts)) target.add(new THREE.Mesh(mergeGeometries(list), mats[k]));
-      },
-    };
-  }
-  const rbox = (w, h, d, r, x, y, z) => new RoundedBoxGeometry(w, h, d, 3, r).translate(x, y, z);
-  const box = (w, h, d, x, y, z, rotZ = 0) => {
-    const g = new THREE.BoxGeometry(w, h, d);
-    if (rotZ) g.rotateZ(rotZ);
-    return g.translate(x, y, z);
-  };
-  const disc = (r, depth, x, y, z, axis = "z") => {
-    const g = new THREE.CylinderGeometry(r, r, depth, 24);
-    if (axis === "z") g.rotateX(Math.PI / 2);
-    if (axis === "x") g.rotateZ(Math.PI / 2);
-    return g.translate(x, y, z);
-  };
-
-  const BODY_D = 150;
-  const WHEEL_R = 27;
-  const BUS_SCALE = 0.0118;
-  const busRoot = new THREE.Group();
-  const busPose = new THREE.Group();
-  const busBody = new THREE.Group();
-  const busWheels = [];
-  let badge;
-  {
-    busRoot.scale.setScalar(BUS_SCALE);
-    busRoot.add(busPose);
-    busPose.add(busBody);
-    const b = batcher();
-    const half = BODY_D / 2;
-    b.add("yellow", rbox(364, 82, BODY_D, 14, 0, -29, 0));
-    b.add("cream", rbox(364, 82, BODY_D, 26, 0, 51, 0));
-    b.add("outline", rbox(369, 87, BODY_D + 5, 16.5, 0, -29, 0));
-    b.add("outline", rbox(369, 87, BODY_D + 5, 28.5, 0, 51, 0));
-    b.add("ink", box(366, 3.5, BODY_D + 2, 0, 12, 0));
-    for (const side of [1, -1]) {
-      const z = side * (half + 0.6);
-      for (const cx of [83, 149, 215, 281, 347]) {
-        const x = cx - 210;
-        b.add("ink", box(60, 56, 1.2, x, 49, z));
-        b.add("glass", box(54, 50, 2, x, 49, z + side * 0.9));
-        b.add("cream", box(3.5, 30, 1, x, 49, z + side * 2, -0.49));
-      }
-      b.add("ink", box(3, 74, 1.4, 38, -29, z));
-      b.add("ink", box(3, 74, 1.4, 104, -29, z));
-      b.add("red", box(3, 22, 18, -183.5, -15, side * 52));
-      b.add("ink", disc(11.5, 2.5, 183, -28, side * 52, "x"));
-      b.add("lamp", disc(9, 4, 184.5, -28, side * 52, "x"));
-    }
-    b.add("ink", box(16, 6, 2, 54, -5, half + 1));
-    for (const z of [30, -30]) {
-      b.add("ink", box(1.2, 56, 60, 182.6, 49, z));
-      b.add("glass", box(2, 50, 54, 183.4, 49, z));
-    }
-    b.add("ink", box(1.2, 44, 96, -182.6, 52, 0));
-    b.add("glass", box(2, 38, 90, -183.4, 52, 0));
-    for (const x of [-179, 179]) {
-      b.add("cream", rbox(38, 11, BODY_D + 6, 4, x, -65.5, 0));
-      b.add("outline", rbox(41, 14, BODY_D + 9, 5.5, x, -65.5, 0));
-    }
-    b.build(busBody);
-
-    badge = new THREE.Group();
-    badge.position.set(-60, -30, half);
-    badge.add(new THREE.Mesh(disc(26, 1.6, 0, 0, 0.8), mats.ink));
-    badge.add(new THREE.Mesh(disc(23, 3, 0, 0, 1.8), mats.cream));
-    const tri = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-7, 12), new THREE.Vector2(-7, -12), new THREE.Vector2(13, 0)]));
-    tri.translate(0, 0, 3.5);
-    badge.add(new THREE.Mesh(tri, mats.ink));
-    busBody.add(badge);
-
-    const arches = batcher();
-    for (const x of [-108, 108]) arches.add("ink", disc(34, BODY_D + 2, x, -74, 0));
-    arches.build(busPose);
-    for (const x of [-108, 108]) {
-      for (const z of [66, -66]) {
-        const wheel = new THREE.Group();
-        wheel.position.set(x, -74, z);
-        const w = batcher();
-        w.add("tyre", disc(WHEEL_R, 24, 0, 0, 0));
-        w.add("outline", disc(WHEEL_R + 2.5, 27, 0, 0, 0));
-        w.add("hub", disc(13, 25, 0, 0, 0));
-        w.add("ink", disc(4, 26, 0, 0, 0));
-        w.add("ink", box(6, 9, 26, 0, 8.5, 0));
-        w.build(wheel);
-        busPose.add(wheel);
-        busWheels.push(wheel);
-      }
-    }
-    /* Ombra morbida a terra. */
-    const c = document.createElement("canvas");
-    c.width = 128;
-    c.height = 64;
-    const g = c.getContext("2d");
-    const r = g.createRadialGradient(64, 32, 2, 64, 32, 64);
-    r.addColorStop(0, "rgba(20,16,14,.5)");
-    r.addColorStop(0.7, "rgba(20,16,14,.25)");
-    r.addColorStop(1, "rgba(20,16,14,0)");
-    g.setTransform(1, 0, 0, 0.5, 0, 16);
-    g.fillStyle = r;
-    g.fillRect(0, 0, 128, 128);
-    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(470, 240), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
-    shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = -102;
-    busRoot.add(shadow);
-    world.add(busRoot);
-  }
+  /* Uno studio fotografico invisibile: dà alla vernice le sue riflessioni. */
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const studio = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
+  pmrem.dispose();
+  const bus = createBus(renderer, studio);
+  world.add(bus.root);
 
   /* ---------- Le stampe ---------- */
   const printGeo = new THREE.PlaneGeometry(1, 1, 22, 16);
@@ -974,6 +957,42 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     if (p) fillPrint(p, image);
   }
 
+  /* Atlante: tutte le foto, quadrate e piccole, in una texture sola. La scritta
+     finale ne usa centinaia di copie con una sola chiamata di disegno. */
+  const ATLAS_CELLS = 10;
+  const ATLAS_SIZE = isPhone ? 1024 : 1536;
+  const atlasCanvas = document.createElement("canvas");
+  atlasCanvas.width = atlasCanvas.height = ATLAS_SIZE;
+  const atlasContext = atlasCanvas.getContext("2d");
+  atlasContext.fillStyle = "#fff8e1";
+  atlasContext.fillRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+  const atlas = new THREE.CanvasTexture(atlasCanvas);
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.minFilter = THREE.LinearFilter;
+  atlas.generateMipmaps = false;
+  /* La cella 0 è della foto del traguardo, che può cambiare. */
+  const atlasUsed = [];
+  let atlasNext = 1;
+  let atlasChanged = 0;
+  let flightPool = null;
+
+  function atlasPut(source, isSelfie) {
+    const cell = isSelfie ? 0 : atlasNext;
+    if (cell >= ATLAS_CELLS * ATLAS_CELLS) return;
+    if (!isSelfie) atlasNext += 1;
+    const size = ATLAS_SIZE / ATLAS_CELLS;
+    const side = Math.min(source.width, source.height);
+    /* Ritaglio un po' più in alto del centro: è lì che stanno i volti. */
+    const sx = (source.width - side) / 2;
+    const sy = (source.height - side) * 0.35;
+    atlasContext.drawImage(source, sx, sy, side, side, (cell % ATLAS_CELLS) * size, Math.floor(cell / ATLAS_CELLS) * size, size, size);
+    atlasChanged = performance.now();
+    if (!atlasUsed.includes(cell)) atlasUsed.push(cell);
+    tilesDirty = true;
+    flightPool = null;
+    return cell;
+  }
+
   /* Le foto degli ospiti esistono solo nel finale, e piccole: un telefono ne
      deve reggere decine insieme alle 29 del viaggio. */
   const MAX_GUESTS = 60;
@@ -1019,6 +1038,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     p.h = fullH;
     u.uInset.value.set(margin / fullW, margin / fullH);
     u.uAspect.value.set(fullW, fullH);
+    p.cell = atlasPut(c, p === selfie);
     p.tint = tint;
     p.src = image.src;
     p.alt = image.alt;
@@ -1033,8 +1053,225 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   selfie.mesh.frustumCulled = false;
   selfie.mesh.renderOrder = 200;
   world.add(selfie.mesh);
-  /* 0 muro, 1 festa. shot misura il volo dalla camera al centro. */
-  const party = { value: 0, target: 0, shot: 1 };
+  /* 0 muro, 1 festa. shot misura il volo dalla camera al centro, hold la pausa
+     prima della scritta, thanks la scritta che si compone. */
+  const party = { value: 0, target: 0, shot: 1, hold: 0, thanks: 0 };
+
+  /* ---------- Il volo di foto tra un luogo e l'altro ----------
+     Stampe che arrivano dal fondo e superano la camera. Vivono nello spazio
+     della camera e dipendono solo da u: tornando indietro si riavvolgono. Tra
+     due luoghi vicini lasciano libero il centro; quando si cambia città si
+     chiudono sullo schermo e il paesaggio cambia dietro di loro. */
+  const CARDS = isPhone ? 64 : 110;
+  const flightGeo = new THREE.PlaneGeometry(1, 1);
+  const flightCells = new THREE.InstancedBufferAttribute(new Float32Array(CARDS * 2), 2);
+  flightCells.setUsage(THREE.DynamicDrawUsage);
+  flightGeo.setAttribute("aCell", flightCells);
+  const flight = new THREE.InstancedMesh(
+    flightGeo,
+    new THREE.ShaderMaterial({
+      vertexShader: TILE_VERT,
+      fragmentShader: TILE_FRAG,
+      uniforms: { uAtlas: { value: atlas }, uCells: { value: ATLAS_CELLS } },
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    CARDS
+  );
+  flight.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  flight.frustumCulled = false;
+  flight.visible = false;
+  flight.renderOrder = 120;
+  world.add(flight);
+  const cardRandom = mulberry(11);
+  const cards = Array.from({ length: CARDS }, () => ({
+    angle: cardRandom() * Math.PI * 2,
+    radius: cardRandom(),
+    delay: cardRandom(),
+    size: 0.75 + cardRandom() * 0.6,
+    spin: (cardRandom() - 0.5) * 2.4,
+    flip: cardRandom() * Math.PI * 2,
+    pick: cardRandom(),
+  }));
+  let flightStop = null;
+
+  /* Le carte mostrano le foto che stanno per arrivare e quelle appena viste. */
+  function dealCards(stop) {
+    flightStop = stop;
+    flightPool = stop;
+    const near = prints.filter((p) => p.cell != null && Math.abs(p.a - stop.u1 - 1.5) < 4.5).map((p) => p.cell);
+    const pool = near.length ? near : atlasUsed.filter((c) => c !== 0);
+    if (!pool.length) return;
+    cards.forEach((c, i) => {
+      const cell = pool[Math.floor(c.pick * pool.length)];
+      flightCells.setXY(i, cell % ATLAS_CELLS, Math.floor(cell / ATLAS_CELLS));
+    });
+    flightCells.needsUpdate = true;
+  }
+
+  function updateFlight(position, time) {
+    const FLIGHT_IN = 0.95;
+    const FLIGHT_OUT = 0.85;
+    const stop = beats.find((b, i) => i > 0 && position > b.u0 - FLIGHT_IN && position < b.u0 + FLIGHT_OUT);
+    if (!stop || !atlasUsed.length) {
+      flight.visible = false;
+      return;
+    }
+    if (flightStop !== stop || flightPool !== stop) dealCards(stop);
+    flight.visible = true;
+    const w = (position - (stop.u0 - FLIGHT_IN)) / (FLIGHT_IN + FLIGHT_OUT);
+    const newPlace = beats[beats.indexOf(stop) - 1].chapter !== stop.chapter;
+    flight.position.copy(camera.position);
+    flight.quaternion.copy(camera.quaternion);
+    const reach = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    cards.forEach((c, i) => {
+      const local = clamp(w * 1.75 - c.delay * 0.75, 0, 1);
+      if (local <= 0 || local >= 1) {
+        dummy.scale.setScalar(0.0001);
+        dummy.position.set(0, 0, 0);
+        dummy.quaternion.identity();
+      } else {
+        /* Accelera arrivando: lontane sembrano ferme, vicine sfrecciano. */
+        const z = lerp(-44, -0.9, local * local);
+        const depth = -z * reach;
+        /* Il centro resta libero se si resta in zona, si chiude se si cambia città. */
+        const inner = newPlace ? 0.04 : 0.62;
+        const r = (inner + c.radius * (1.25 - inner)) * depth;
+        const a = c.angle + local * 2.2 * (i % 2 ? 1 : -1) + time * 0.08;
+        dummy.position.set(Math.cos(a) * r * Math.max(camera.aspect, 0.8), Math.sin(a) * r, z);
+        dummy.rotation.set(Math.sin(c.flip + local * 4) * 0.5, Math.cos(c.flip + local * 3) * 0.5, c.flip + local * c.spin);
+        const size = c.size * (newPlace ? 3.1 : 2.1) * Math.min(1, local * 6);
+        dummy.scale.set(size, size, 1);
+      }
+      dummy.updateMatrix();
+      flight.setMatrixAt(i, dummy.matrix);
+    });
+    flight.instanceMatrix.needsUpdate = true;
+  }
+
+  /* ---------- La scritta di foto ---------- */
+  const MAX_TILES = isPhone ? 240 : 380;
+  const tileGeo = new THREE.PlaneGeometry(1, 1);
+  const tileCells = new THREE.InstancedBufferAttribute(new Float32Array(MAX_TILES * 2), 2);
+  tileCells.setUsage(THREE.DynamicDrawUsage);
+  tileGeo.setAttribute("aCell", tileCells);
+  const tiles = new THREE.InstancedMesh(
+    tileGeo,
+    new THREE.ShaderMaterial({
+      vertexShader: TILE_VERT,
+      fragmentShader: TILE_FRAG,
+      uniforms: { uAtlas: { value: atlas }, uCells: { value: ATLAS_CELLS } },
+    }),
+    MAX_TILES
+  );
+  tiles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  tiles.frustumCulled = false;
+  tiles.visible = false;
+  tiles.renderOrder = 150;
+  world.add(tiles);
+  /* Il profilo delle lettere, scuro, dietro le foto: sul cielo giallo sono lui
+     e gli spazi tra le caselle a rendere leggibili le parole. */
+  const plate = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ color: "#2b2622", transparent: true, opacity: 0, depthWrite: false, fog: false })
+  );
+  plate.visible = false;
+  plate.frustumCulled = false;
+  plate.renderOrder = 149;
+  world.add(plate);
+  let tilesDirty = true;
+  const tileSpots = [];
+  let tileSize = 1;
+
+  /* Si disegnano le parole su un canvas e si tiene una casella dove c'è
+     inchiostro: così la scritta si adatta a schermo e lingua senza coordinate
+     fatte a mano. La griglia si allarga finché le caselle stanno nel limite. */
+  function layoutTiles() {
+    const narrow = camera.aspect < 1;
+    const lines = narrow ? THANKS.narrow : THANKS.wide;
+    const W = 1200;
+    const H = Math.round(W * (wall.h / wall.w));
+    const c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    const family = '"Arial Black", "Helvetica Neue", Roboto, system-ui, sans-serif';
+    let size = H;
+    g.font = `900 ${size}px ${family}`;
+    const widest = Math.max(...lines.map((l) => g.measureText(l).width));
+    size = Math.min((size * W * 0.96) / widest, (H * 0.96) / (lines.length * 1.08));
+    g.font = `900 ${size}px ${family}`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillStyle = g.strokeStyle = "#000";
+    g.lineJoin = "round";
+    /* Il contorno ingrossa le lettere: i font sottili non reggerebbero la griglia. */
+    g.lineWidth = size * 0.07;
+    const lead = size * 1.08;
+    lines.forEach((l, i) => {
+      const y = H / 2 + (i - (lines.length - 1) / 2) * lead;
+      g.fillText(l, W / 2, y);
+      g.strokeText(l, W / 2, y);
+    });
+    plate.material.map?.dispose();
+    plate.material.map = new THREE.CanvasTexture(c);
+    plate.material.needsUpdate = true;
+    const data = g.getImageData(0, 0, W, H).data;
+    let cell = Math.max(10, Math.round(W / 76));
+    let spots;
+    for (;;) {
+      spots = [];
+      for (let y = cell / 2; y < H; y += cell) {
+        for (let x = cell / 2; x < W; x += cell) {
+          /* Una casella resta solo se sta quasi tutta dentro la lettera: così
+             gli occhielli di A, R ed E restano aperti. */
+          let inside = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const px = Math.floor(x + dx * cell * 0.36);
+              const py = Math.floor(y + dy * cell * 0.36);
+              if (px >= 0 && py >= 0 && px < W && py < H && data[(py * W + px) * 4 + 3] > 128) inside += 1;
+            }
+          }
+          if (inside >= 7) spots.push([x, y]);
+        }
+      }
+      if (spots.length <= MAX_TILES) break;
+      cell += 1;
+    }
+    const unit = wall.w / W;
+    tileSize = cell * unit;
+    tileSpots.length = 0;
+    const r = mulberry(31);
+    for (const [x, y] of spots) {
+      tileSpots.push({
+        x: (x - W / 2) * unit,
+        y: (H / 2 - y) * unit,
+        /* Le lettere si riempiono da sinistra a destra, con un po' di disordine. */
+        delay: (x / W) * 0.72 + r() * 0.28,
+        angle: r() * Math.PI * 2,
+        band: 0.8 + r() * 0.2,
+        tilt: (r() - 0.5) * 0.9,
+        seed: r() * 6.28,
+      });
+    }
+    tiles.count = tileSpots.length;
+    tilesDirty = true;
+  }
+
+  /* Una casella su cinque è la foto appena scattata, il resto gira su tutte. */
+  function assignTiles() {
+    tilesDirty = false;
+    const others = atlasUsed.filter((c) => c !== 0);
+    if (!others.length) return;
+    const r = mulberry(5);
+    tileSpots.forEach((spot, i) => {
+      const cell = i % 5 === 0 && atlasUsed.includes(0) ? 0 : others[Math.floor(r() * others.length)];
+      tileCells.setXY(i, cell % ATLAS_CELLS, Math.floor(cell / ATLAS_CELLS));
+    });
+    tileCells.needsUpdate = true;
+  }
 
   /* ---------- Stato ---------- */
   let vw = 1;
@@ -1099,6 +1336,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     key.intensity = mix.keyI;
     lampMat.opacity = mix.lamps;
     lamps.visible = mix.lamps > 0.02;
+    glowMat.color.setScalar(0.28 + mix.lamps * 0.85);
+    sandMat.color.set("#ecd6a4").lerp(mix.low, 0.25).multiplyScalar(clamp(mix.hemiI / 2, 0.45, 1));
     paintMat.color.set("#fff8e1").lerp(mix.road, 0.25);
     if (sea) {
       const su = sea.material.uniforms;
@@ -1110,6 +1349,19 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   }
 
   function currentAir(x) {
+    if (x > finale) {
+      const a = airUniforms;
+      const set = particleSets.confetti;
+      a.uAmount.value = smooth(finale, finale + 0.8, x) * 0.7 + 0.1;
+      a.uSize.value = set.size;
+      a.uFall.value = set.fall;
+      a.uDrift.value = set.drift;
+      a.uShape.value = set.shape;
+      a.uColorA.value.copy(set.a);
+      a.uColorB.value.copy(set.b);
+      a.uConfetti.value = 1;
+      return;
+    }
     const c = chapters.find((ch) => x < ch.u1) ?? chapters[chapters.length - 1];
     const prev = chapters[c.index - 1];
     const set = particleSets[c.particles];
@@ -1126,8 +1378,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     a.uShape.value = cur.shape;
     a.uColorA.value.copy(cur.a);
     a.uColorB.value.copy(cur.b);
-    a.uConfetti.value = cur.shape === 2 ? 1 : 0;
-    if (cur.shape === 2) a.uAmount.value *= smooth(c.photosU, finale + 0.6, x) * 0.7 + 0.3;
+    a.uConfetti.value = 0;
   }
 
   /* Dove sta la stampa a fuoco, davanti alla camera. */
@@ -1158,6 +1409,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     });
     wall.h = rows * (wall.cell + wall.gap);
     wall.w = wall.cols * (wall.cell + wall.gap);
+    layoutTiles();
   }
 
   function resize() {
@@ -1198,6 +1450,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
     party.value += (party.target - party.value) * (1 - Math.exp(-dt * 2.2));
     party.shot = Math.min(1, party.shot + dt / 1.9);
+    if (selfie.ready && party.shot >= 1) party.hold += dt;
+    if (party.hold > 2.4) party.thanks = Math.min(1, party.thanks + dt / 4.4);
 
     pointerSmooth.lerp(pointer, 0.07);
     currentSky(u);
@@ -1212,28 +1466,31 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     /* Pulmino */
     jolt *= Math.exp(-dt * 5);
     const engine = u < INTRO_UNITS ? 0.012 : 0.02 * (0.4 + speed);
-    busRoot.position.copy(pBus).addScaledVector(camUp.set(0, 1, 0), 104 * BUS_SCALE);
-    busRoot.rotation.y = Math.atan2(-pDir.x, -pDir.z) + Math.PI / 2;
-    busPose.rotation.z = clamp(velocity * 0.012, -0.05, 0.05) + jolt * 0.05;
-    busBody.position.y = Math.sin(t * 16) * engine * 30 + Math.sin(t * 2.3) * 1.2;
-    busBody.rotation.x = Math.sin(t * 1.7) * 0.006 + clamp((pDir.x) * 0.08, -0.03, 0.03);
-    const roll = -s / (WHEEL_R * BUS_SCALE);
-    busWheels.forEach((w) => (w.rotation.z = roll));
+    bus.root.position.copy(pBus);
+    bus.root.rotation.y = Math.atan2(-pDir.x, -pDir.z) + Math.PI / 2;
+    bus.pose.rotation.z = clamp(velocity * 0.006, -0.02, 0.02) + jolt * 0.035;
+    bus.body.position.y = Math.sin(t * 16) * engine * 0.3 + Math.sin(t * 2.3) * 0.01;
+    bus.body.rotation.x = Math.sin(t * 1.7) * 0.004 + clamp(pDir.x * 0.05, -0.02, 0.02);
+    bus.setRoll(s);
+    bus.setLight(clamp(mix.hemiI / 2, 0.3, 1));
     const beat = Math.pow(Math.max(0, Math.sin(t * 2.5)), 12);
-    badge.visible = u < INTRO_UNITS * 0.7;
-    badge.scale.setScalar(1 + beat * 0.14);
+    bus.badge.visible = u < INTRO_UNITS * 0.7;
+    bus.badge.scale.setScalar(1 + beat * 0.14);
 
     /* Camera: di fianco al pulmino parcheggiato, poi dietro; tra un capitolo e
        l'altro gli gira intorno. */
-    const chapter = chapters.find((c) => u < c.u1) ?? chapters[chapters.length - 1];
-    const gap = chapter.index ? clamp((u - chapter.u0) / GAP_UNITS, 0, 1) : 1;
-    const gapShape = Math.sin(gap * Math.PI);
-    const orbitSide = chapter.index % 2 ? -1 : 1;
+    const stop = beats.find((b) => u >= b.u0 && u < b.u1);
+    const gap = stop ? (u - stop.u0) / (stop.u1 - stop.u0) : 0;
+    const gapShape = stop ? Math.pow(Math.sin(gap * Math.PI), 0.7) : 0;
+    /* In tappa la camera sta dalla parte opposta al luogo, con il pulmino
+       davanti e il luogo dietro. Dentro l'aula resta in scia, bassa. */
+    const orbitSide = stop && !stop.through ? -stop.side : 1;
+    const orbit = stop?.through ? 0 : 1.15;
     const intro = 1 - smooth(0.2, INTRO_UNITS, u);
-    let theta = lerp(0.2 * orbitSide, 1.38, intro) + orbitSide * gapShape * 1.05;
+    let theta = lerp(0.2, 1.38, intro) + orbitSide * gapShape * orbit;
     theta += pointerSmooth.x * 0.05;
-    const R = (lerp(10.5, 9.6, intro) - gapShape * 2.5) * fit;
-    const height = lerp(3.3, 2.1, intro) - gapShape * 1.3 + pointerSmooth.y * -0.2;
+    const R = Math.min((lerp(10.5, 9.6, intro) + gapShape * (stop?.through ? -1 : 4.5)) * fit, lerp(40, stop?.through ? 9 : 17, gapShape));
+    const height = Math.max(1.5, lerp(3.3, 2.1, intro) - gapShape * 1.4) + pointerSmooth.y * -0.2;
     camera.position
       .copy(pBus)
       .addScaledVector(pDir, -Math.cos(theta) * R)
@@ -1241,15 +1498,22 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     camera.position.y = pBus.y + height;
     pLook.copy(pBus).addScaledVector(pDir, lerp(4.5, 0, intro));
     pLook.y = pBus.y + lerp(1.8, 1.4, intro);
+    if (stop && !stop.through) pLook.lerp(stop.centre, gapShape * (camera.aspect < 1 ? 0.22 : 0.6));
+
+    for (const b of beats) {
+      b.entry.group.visible = Math.abs(s - b.s) < 330;
+      if (b.entry.mover) b.entry.mover.position.x = lerp(-20, 20, clamp((u - b.u0) / (b.u1 - b.u0), 0, 1));
+    }
 
     /* Finale: la camera arretra e guarda il muro di foto. */
     const finaleT = smooth(finale + 0.2, finale + 2.6, u);
     if (finaleT > 0) {
-      const wallDist = Math.max(wall.h / (2 * Math.tan(THREE.MathUtils.degToRad(23))), wall.w / (2 * Math.tan(THREE.MathUtils.degToRad(23)) * camera.aspect)) * 1.5;
+      const closeUp = easeInOut(smooth(0.08, 0.7, party.thanks));
+      const wallDist = Math.max(wall.h / (2 * Math.tan(THREE.MathUtils.degToRad(23))), wall.w / (2 * Math.tan(THREE.MathUtils.degToRad(23)) * camera.aspect)) * lerp(1.5, 1.08, closeUp);
       vA.copy(pBus).addScaledVector(pDir, WALL_AHEAD);
       vA.y += wall.h / 2 + WALL_LIFT;
       vB.copy(vA).addScaledVector(pDir, -wallDist);
-      vB.y -= wall.h * 0.34;
+      vB.y -= wall.h * 0.34 * (1 - closeUp);
       camera.position.lerp(vB, finaleT);
       pLook.lerp(vA, finaleT);
     }
@@ -1257,7 +1521,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     /* Tagliato il traguardo, lo striscione si alza e libera la vista. */
     arch.position.y = roadY(end - 22) + finaleT * finaleT * 34;
 
-    camera.fov = 46 + speed * 9;
+    camera.fov = 46 + speed * 9 + gapShape * (stop?.through ? 8 : 12);
     camera.updateProjectionMatrix();
     camera.lookAt(pLook);
     camera.rotateZ(Math.sin(t * 0.4) * 0.006 - clamp(velocity * 0.01, -0.03, 0.03));
@@ -1277,12 +1541,18 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     /* Foto */
     let best = null;
     let bestFocus = 0;
+    /* In tappa la foto appena vista e quella che arriva restano in alto ai
+       lati: si guarda il luogo senza perdere il filo delle foto. */
+    const peekIn = stop ? smooth(0, 0.15, gap) * (1 - smooth(0.84, 0.97, gap)) : 0;
+    const nextPrint = stop ? prints.findIndex((p) => !p.guest && p.a >= stop.u1) : -1;
     for (const p of prints) {
       const tl = (u - p.a) / 1;
       const m = p.mesh.material.uniforms;
       const showFinale = finaleT > 0.001;
       const live = tl > -1.1 && tl < 1.25;
-      p.mesh.visible = p.ready && (live || showFinale);
+      const peekSide = nextPrint < 0 ? 0 : p.index === nextPrint ? 1 : p.index === nextPrint - 1 ? -1 : 0;
+      const peek = peekSide ? peekIn : 0;
+      p.mesh.visible = p.ready && (live || showFinale || peek > 0);
       if (!p.mesh.visible) continue;
 
       m.uTime.value = t;
@@ -1331,6 +1601,27 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       let fade = smooth(-1.1, -0.85, tl) * (1 - smooth(1.02, 1.2, tl));
       m.uFogAmount.value = (1 - eased) * clamp((camera.position.distanceTo(p.mesh.position) - 30) / 70, 0, 0.9);
 
+      if (peek > 0) {
+        const narrow = camera.aspect < 1;
+        const span = 2 * 5.6 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        const across = span * camera.aspect;
+        const target = Math.min(((narrow ? 0.24 : 0.4) * span) / p.h, ((narrow ? 0.44 : 0.3) * across) / p.w);
+        const lift = (narrow ? 0.31 : 0.2) * span + Math.sin(t * 0.7 + p.seed) * 0.04;
+        vC.copy(camera.position)
+          .addScaledVector(camForward, 5.6)
+          .addScaledVector(camRight, peekSide * (narrow ? 0.25 : 0.34) * across)
+          .addScaledVector(camUp, lift);
+        const ease = easeInOut(peek);
+        p.mesh.position.lerp(vC, ease);
+        qA.copy(camera.quaternion);
+        tmpQ.setFromAxisAngle(axisZ, -peekSide * 0.05 + Math.sin(t * 0.5 + p.seed) * 0.015);
+        qA.multiply(tmpQ);
+        p.mesh.quaternion.slerp(qA, ease);
+        sc = lerp(sc, target, ease);
+        fade = Math.max(fade, smooth(0, 0.3, peek));
+        m.uFogAmount.value *= 1 - ease;
+      }
+
       /* Nel finale ogni foto vola al suo posto nel muro, una dopo l'altra. */
       if (showFinale) {
         const delay = (p.index / prints.length) * 0.5;
@@ -1370,10 +1661,12 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       }
 
       p.mesh.scale.set(p.w * sc, p.h * sc, sc);
+      /* Solo nel finale: chi torna con la sua foto deve rivedere tutto il viaggio. */
+      fade *= 1 - smooth(0.04, 0.34, party.thanks * finaleT);
       m.uFade.value = fade;
       p.mesh.visible = p.mesh.visible && fade > 0.004;
       /* La stampa si sviluppa mentre arriva, come una polaroid. */
-      m.uDevelop.value = showFinale ? 1 : smooth(-0.45, 0.28, tl);
+      m.uDevelop.value = showFinale ? 1 : Math.max(smooth(-0.45, 0.28, tl), peek);
       m.uFocus.value = held * (1 - gone);
       m.uWave.value = lerp(0.04, 0.012, held * (1 - gone));
 
@@ -1400,15 +1693,52 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       selfie.mesh.quaternion.copy(qB);
       tmpQ.setFromAxisAngle(axisZ, (1 - fly) * 0.3 - 0.03 + Math.sin(t * 0.7) * 0.015);
       selfie.mesh.quaternion.multiply(tmpQ);
-      const sc = lerp(startScale, finalScale, fly);
+      const sc = lerp(startScale, finalScale, fly) * (1 - smooth(0.05, 0.42, party.thanks) * 0.8);
       selfie.mesh.scale.set(selfie.w * sc, selfie.h * sc, sc);
       m.uTime.value = t;
       m.uPointer.value.copy(pointerSmooth);
       m.uFog.value.copy(world.fog.color);
       m.uDevelop.value = smooth(0.1, 0.8, party.shot);
-      m.uFade.value = smooth(0.01, 0.2, party.value * finaleT);
+      m.uFade.value = smooth(0.01, 0.2, party.value * finaleT) * (1 - smooth(0.3, 0.46, party.thanks));
       m.uWave.value = 0.02;
     }
+    /* L'atlante si carica quando le foto hanno smesso di arrivare. */
+    if (atlasChanged && now - atlasChanged > 700) {
+      atlas.needsUpdate = true;
+      atlasChanged = 0;
+    }
+    updateFlight(u, t);
+
+    /* Le foto lasciano il cerchio e compongono la scritta. */
+    tiles.visible = plate.visible = party.thanks > 0.001 && finaleT > 0.3 && tileSpots.length > 0;
+    if (tiles.visible) {
+      if (tilesDirty) assignTiles();
+      vC.copy(pBus).addScaledVector(pDir, WALL_AHEAD - 0.4);
+      vC.y += wall.h / 2 + WALL_LIFT;
+      plate.position.copy(vC).addScaledVector(camForward, 0.1);
+      plate.quaternion.copy(camera.quaternion);
+      plate.scale.set(wall.w, wall.h, 1);
+      plate.material.opacity = smooth(0.25, 0.75, party.thanks);
+      const reveal = party.thanks;
+      tileSpots.forEach((spot, i) => {
+        const local = easeInOut(clamp((reveal - spot.delay * 0.55) / 0.45, 0, 1));
+        const ax = Math.cos(spot.angle + t * 0.22) * wall.w * 0.44 * spot.band;
+        const ay = Math.sin(spot.angle + t * 0.22) * wall.h * 0.45 * spot.band;
+        const x = lerp(ax, spot.x, local);
+        const y = lerp(ay, spot.y, local) + Math.sin(t * 0.8 + spot.x * 0.5) * 0.06 * local;
+        const lift = Math.sin(local * Math.PI) * 2.4;
+        dummy.position.copy(vC).addScaledVector(camRight, x).addScaledVector(camUp, y).addScaledVector(camForward, -lift);
+        dummy.quaternion.copy(camera.quaternion);
+        tmpQ.setFromAxisAngle(axisZ, spot.tilt * (1 - local) * 3 + Math.sin(t + spot.seed) * 0.03);
+        dummy.quaternion.multiply(tmpQ);
+        const size = tileSize * 0.97 * Math.min(1, local * 3) * finaleT;
+        dummy.scale.set(size, size, 1);
+        dummy.updateMatrix();
+        tiles.setMatrixAt(i, dummy.matrix);
+      });
+      tiles.instanceMatrix.needsUpdate = true;
+    }
+
     if (party.value > 0.01) {
       airUniforms.uAmount.value = Math.max(airUniforms.uAmount.value, party.value * finaleT);
     }
@@ -1465,6 +1795,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       if (unlocked) return;
       unlocked = true;
       syncHeight();
+      /* Si comincia sempre dal pulmino parcheggiato, anche ricaricando. */
+      window.scrollTo(0, 0);
       readScroll();
     },
     get unlocked() {
@@ -1482,6 +1814,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       fillPrint(selfie, image);
       party.target = 1;
       party.shot = celebrate ? 0 : 1;
+      party.hold = 0;
+      party.thanks = celebrate ? 0 : 1;
       if (!celebrate) party.value = 1;
     },
     /* Primo tratto dopo il tocco sul pulmino. */
