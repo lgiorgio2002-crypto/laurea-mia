@@ -1,0 +1,12 @@
+name = "laurea-wall"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://lgiorgio2002-crypto.github.io"
+# Sette giorni dalla pubblicazione: si imposta al momento del deploy.
+CLOSES_AT = "2026-11-13T23:59:59Z"
+
+[[kv_namespaces]]
+binding = "WALL"
+id = "89c4ac2ed8974dc98c9024e45d4ea0d0"

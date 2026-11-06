@@ -1,2 +1,5 @@
 private/
 secret.key
+node_modules/
+.wrangler/
+.dev.vars

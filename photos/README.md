@@ -10,11 +10,14 @@ essere pubblicata:
 
 ## Aggiungere, togliere o riordinare foto
 
-1. Metti le foto in `private/photos/` con nomi come `32.jpeg` (estensione
-   minuscola). Il numero è l'ordine.
-2. Esegui `node build.js` dalla cartella del progetto: cifra solo le foto
+1. Metti le foto in `private/photos/` con nomi come `33.jpeg` (estensione
+   minuscola, non `.jpg`: il build ignora tutto il resto).
+2. L'ordine lo decide `chapters.js`: ogni capitolo elenca i numeri delle sue
+   foto. Se rinumeri, aggiorna quegli elenchi. Una foto che non è in nessun
+   capitolo finisce in fondo a "mondo".
+3. Esegui `node build.js` dalla cartella del progetto: cifra solo le foto
    nuove o cambiate e toglie quelle cancellate.
-3. Commit e push della cartella `photos/`.
+4. Commit e push di `photos/` e `chapters.js`.
 
 ## Metadati
 
