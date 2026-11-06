@@ -9,7 +9,7 @@ Dalla cartella `worker/`:
 
 1. `npx wrangler login`
 2. `npx wrangler kv namespace create WALL`, poi copia l'`id` in `wrangler.toml`
-3. In `wrangler.toml` imposta `CLOSES_AT`: sette giorni dalla pubblicazione
+3. In `wrangler.toml` imposta `CLOSES_AT`, la data di chiusura dei caricamenti
 4. `node admin.js pass-hash | npx wrangler secret put UPLOAD_PASS_HASH`
 5. `npx wrangler secret put ADMIN_TOKEN` e scegli una stringa lunga e casuale
 6. `npx wrangler deploy`

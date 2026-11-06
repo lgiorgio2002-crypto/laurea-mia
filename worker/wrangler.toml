@@ -4,8 +4,8 @@ compatibility_date = "2026-10-01"
 
 [vars]
 ALLOWED_ORIGINS = "https://lgiorgio2002-crypto.github.io"
-# Sette giorni dalla pubblicazione: si imposta al momento del deploy.
-CLOSES_AT = "2026-11-13T23:59:59Z"
+# Data di chiusura dei caricamenti: vale dopo `npx wrangler deploy`.
+CLOSES_AT = "2026-11-30T23:59:59Z"
 
 [[kv_namespaces]]
 binding = "WALL"

@@ -1,6 +1,7 @@
-// Il viaggio: un mondo Three.js percorso da un pulmino, guidato dallo scroll.
+// Il viaggio: un mondo Three.js percorso da un pulmino, a passi. Ogni tocco è un
+// passo: una foto, un luogo, il finale. Più tocchi in fretta, più va in fretta.
 // Tutto è funzione di una sola grandezza, "u", le unità di timeline: 1 unità è
-// una foto. Lo scroll decide u, u decide tutto il resto, così tornare indietro
+// una foto. I passi decidono u, u decide tutto il resto, così tornare indietro
 // riavvolge il film. Solo la vita di fondo (aria, onde, foto che respirano) va
 // avanti da sola.
 import * as THREE from "three";
@@ -8,9 +9,13 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { createBus } from "./bus.js";
 import { FINALE_SKY, PALETTES, PARTICLES, THANKS } from "./chapters.js";
-import { buildLandmark, facadeTexture, LANDMARKS } from "./landmarks.js";
+import { buildLandmark, cobbleTexture, facadeTexture, groundTexture, LANDMARKS, pavingTexture } from "./landmarks.js";
+import { CITIES, onBeachFront, onLand, outlines, ROUTE } from "./map.js";
 
-const SCROLL_VH_PER_UNIT = 62;
+/* Un passo fermo dura così, in secondi. I tocchi in coda lo accorciano. */
+const STEP_TIME = 0.95;
+const SWIPE_PX = 42;
+const HOLD_MS = 450;
 const WORLD_PER_UNIT = 30;
 const FINALE_UNITS = 4.5;
 const INTRO_UNITS = 1.4;
@@ -19,6 +24,21 @@ const BEAT_UNITS = 1.9;
 /* Il muro finale sta poco oltre il punto in cui si ferma il pulmino. */
 const WALL_AHEAD = 12;
 const WALL_LIFT = 5.5;
+/* Il tratto dritto davanti a ogni luogo, da una parte e dall'altra. */
+const BEAT_ROAD = 38;
+/* Il salto di città cade dove le foto in volo coprono lo schermo. */
+const CUT_BEFORE = 0.1;
+const LEG_GAP = 800;
+const ROAD_STEP = 2;
+/* Metri di mondo coperti da una tessera di selciato. */
+const TILE = 7;
+/* La carreggiata, poi il marciapiede. */
+const ROAD_HALF = 4.3;
+const WALK_HALF = 7.6;
+/* Quanto spazio libero chiede ogni luogo attorno a sé. */
+const CLEARING = { tiber: 118, colosseum: 92, comercio: 135, nova: 104, pantheon: 72, luissVilla: 80, luissGlass: 62, aula: 62, vittoriano: 74, spagna: 72, tower: 50, belem: 40, tram: 92, carcavelos: 78, sunsetBeach: 70 };
+/* Guida libera. */
+const DRIVE = { top: 36, reverse: 12, accel: 20, brake: 34, drag: 9, turn: 1.7 };
 
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
@@ -36,18 +56,77 @@ function mulberry(seed) {
 }
 
 /* ---------- La strada ----------
-   Una curva analitica: ogni punto si calcola al volo, senza tabelle. */
-function roadX(s) {
-  return 14 * Math.sin(s * 0.006) + 6 * Math.sin(s * 0.017 + 1);
+   Una curva per città, passante per i luoghi di map.js e campionata a passi
+   uguali. s è la distanza lungo tutti i tratti messi in fila, con un vuoto tra
+   l'uno e l'altro: si calcola su s come se la strada fosse una sola. */
+let legs = [];
+
+function buildRoad() {
+  let cursor = 0;
+  legs = Object.entries(ROUTE).map(([id, route]) => {
+    const points = [];
+    const anchors = [];
+    for (const step of route.path) {
+      if (step.via) {
+        points.push(new THREE.Vector3(step.via[0], 0, step.via[1]));
+        continue;
+      }
+      const spec = LANDMARKS[step.landmark];
+      const h = THREE.MathUtils.degToRad(step.heading);
+      const dx = Math.sin(h);
+      const dz = -Math.cos(h);
+      const o = step.side * spec.offset;
+      /* La strada passa di fianco al luogo, a distanza giusta per inquadrarlo. */
+      const x = step.place[0] + dz * o;
+      const z = step.place[1] - dx * o;
+      points.push(new THREE.Vector3(x - dx * BEAT_ROAD, 0, z - dz * BEAT_ROAD), new THREE.Vector3(x, 0, z), new THREE.Vector3(x + dx * BEAT_ROAD, 0, z + dz * BEAT_ROAD));
+      anchors.push({ step, x, z });
+    }
+    const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
+    curve.arcLengthDivisions = points.length * 80;
+    const length = curve.getLength();
+    const n = Math.ceil(length / ROAD_STEP);
+    const samples = curve.getSpacedPoints(n);
+    const leg = { id, city: route.city, start: cursor, end: cursor + length, step: length / n, xs: samples.map((p) => p.x), zs: samples.map((p) => p.z), stops: new Map() };
+    let from = 0;
+    for (const a of anchors) {
+      let best = from;
+      let bestD = Infinity;
+      for (let i = from; i < samples.length; i++) {
+        const d = Math.hypot(samples[i].x - a.x, samples[i].z - a.z);
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+        /* Il primo passaggio, non un incrocio più avanti. */
+        if (bestD < 3 && d > 12) break;
+      }
+      leg.stops.set(a.step.landmark, { s: leg.start + best * leg.step, step: a.step });
+      from = best;
+    }
+    cursor = leg.end + LEG_GAP;
+    return leg;
+  });
 }
-function roadY(s) {
-  return 0.5 * Math.sin(s * 0.009) + 0.2 * Math.sin(s * 0.023);
+
+function legAt(s) {
+  for (let i = 0; i < legs.length - 1; i++) if (s < legs[i].end + LEG_GAP / 2) return legs[i];
+  return legs[legs.length - 1];
 }
 function roadPoint(s, out = new THREE.Vector3()) {
-  return out.set(roadX(s), roadY(s), -s);
+  const leg = legAt(s);
+  const f = (s - leg.start) / leg.step;
+  const i = clamp(Math.floor(f), 0, leg.xs.length - 2);
+  /* Oltre i capi la strada prosegue dritta. */
+  const t = f - i;
+  return out.set(lerp(leg.xs[i], leg.xs[i + 1], t), 0, lerp(leg.zs[i], leg.zs[i + 1], t));
 }
+const dirA = new THREE.Vector3();
+const dirB = new THREE.Vector3();
 function roadDir(s, out = new THREE.Vector3()) {
-  return out.set(roadX(s + 1) - roadX(s - 1), roadY(s + 1) - roadY(s - 1), -2).normalize();
+  roadPoint(s + 3, dirA);
+  roadPoint(s - 3, dirB);
+  return out.subVectors(dirA, dirB).normalize();
 }
 
 /* ---------- Timeline ---------- */
@@ -91,32 +170,65 @@ function buildTimeline(chapters) {
     return 0.55 + 0.75 * Math.abs(local * 2 - 1);
   }
 
+  buildRoad();
   const STEP = 0.02;
   const table = [0];
   for (let x = 0; x < total + STEP; x += STEP) {
     table.push(table[table.length - 1] + pace(x) * WORLD_PER_UNIT * STEP);
   }
-  const distanceAt = (x) => {
+  const rawAt = (x) => {
     const f = clamp(x, 0, total) / STEP;
     const i = Math.floor(f);
     return lerp(table[i], table[Math.min(i + 1, table.length - 1)], f - i);
   };
 
+  /* Il ritmo è deciso sopra; qui lo si appoggia alla strada vera. Davanti ai
+     luoghi il pulmino va alla sua velocità, tra un luogo e l'altro copre la
+     distanza che c'è. Al cambio di città s salta. */
+  const knots = [];
+  const add = (r, at) => knots.push([r, at]);
+  beats.forEach((b, i) => {
+    const leg = legs.find((l) => l.id === chapters[b.chapter].id);
+    const stop = leg.stops.get(b.landmark);
+    b.s = stop.s;
+    b.place = stop.step.place;
+    b.name = stop.step.name;
+    b.side = stop.step.side;
+    const r0 = rawAt(b.u0);
+    const r1 = rawAt(b.u1);
+    const prev = beats[i - 1];
+    if (!prev || prev.chapter !== b.chapter) {
+      const cut = prev ? rawAt(b.u0 - CUT_BEFORE) : 0;
+      if (prev) add(cut, prev.s + BEAT_ROAD + (cut - rawAt(prev.u1)));
+      add(cut, b.s - BEAT_ROAD - (r0 - cut));
+    }
+    add(r0, b.s - BEAT_ROAD);
+    add(r1, b.s + BEAT_ROAD);
+    if (i === beats.length - 1) add(rawAt(total), b.s + BEAT_ROAD + rawAt(total) - r1);
+  });
+  const distanceAt = (x) => {
+    const r = rawAt(x);
+    for (let i = 0; i < knots.length - 1; i++) {
+      if (r < knots[i + 1][0]) {
+        const [r0, s0] = knots[i];
+        const [r1, s1] = knots[i + 1];
+        return lerp(s0, s1, (r - r0) / (r1 - r0));
+      }
+    }
+    return knots[knots.length - 1][1];
+  };
+
   chapters.forEach((c) => {
-    c.s0 = distanceAt(c.u0);
-    c.s1 = distanceAt(c.u1);
+    const leg = legs.find((l) => l.id === c.id);
+    c.s0 = leg.start;
+    c.s1 = leg.end;
   });
   prints.forEach((p) => {
     p.s = distanceAt(p.a + 0.5);
   });
   beats.forEach((b) => {
-    b.s0 = distanceAt(b.u0);
-    b.s1 = distanceAt(b.u1);
-    b.s = distanceAt((b.u0 + b.u1) / 2 + 0.1);
-  });
-  /* A parte: serve la posizione della tappa dopo. */
-  beats.forEach((b, i) => {
-    b.zoneEnd = beats[i + 1] ? beats[i + 1].s0 : distanceAt(total);
+    b.s0 = b.s - BEAT_ROAD;
+    b.s1 = b.s + BEAT_ROAD;
   });
   return { prints, beats, finale, total, distanceAt, end: distanceAt(total) };
 }
@@ -151,6 +263,7 @@ function ribbon(s0, s1, step, offsets, heightAt) {
   const rows = Math.ceil((s1 - s0) / step) + 1;
   const cols = offsets.length;
   const pos = new Float32Array(rows * cols * 3);
+  const uv = new Float32Array(rows * cols * 2);
   const idx = [];
   const p = new THREE.Vector3();
   const d = new THREE.Vector3();
@@ -166,6 +279,8 @@ function ribbon(s0, s1, step, offsets, heightAt) {
       pos[i] = p.x + rx * o;
       pos[i + 1] = p.y + heightAt(o, s);
       pos[i + 2] = p.z + rz * o;
+      uv[((r * cols + c) * 2)] = pos[i] / TILE;
+      uv[((r * cols + c) * 2) + 1] = pos[i + 2] / TILE;
       if (r < rows - 1 && c < cols - 1) {
         const a = r * cols + c;
         const b = a + cols;
@@ -175,24 +290,9 @@ function ribbon(s0, s1, step, offsets, heightAt) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   g.setIndex(idx);
   return g;
-}
-
-function dashes(s0, s1) {
-  const list = [];
-  const p = new THREE.Vector3();
-  const d = new THREE.Vector3();
-  for (let s = s0; s < s1; s += 7) {
-    const g = new THREE.PlaneGeometry(0.22, 3);
-    g.rotateX(-Math.PI / 2);
-    roadPoint(s, p);
-    roadDir(s, d);
-    g.rotateY(Math.atan2(-d.x, -d.z));
-    g.translate(p.x, p.y + 0.05, p.z);
-    list.push(g);
-  }
-  return mergeGeometries(list);
 }
 
 /* ---------- Shader ---------- */
@@ -226,6 +326,95 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+/* Onde lunghe che arrivano a riva, si alzano e rompono in schiuma. d è la
+   distanza dalla battigia. */
+const SURF_VERT = /* glsl */ `
+attribute float aD;
+varying float vD;
+varying float vCrest;
+varying vec3 vWorld;
+uniform float uTime;
+float crest(float d, float x) {
+  float p = d * 0.075 + uTime * 0.85 + sin(x * 0.013) * 1.6 + sin(x * 0.031) * 0.5;
+  return pow(0.5 + 0.5 * sin(p), 11.0);
+}
+void main() {
+  vec3 p = position;
+  vD = aD;
+  float c = crest(aD, p.x);
+  float grow = smoothstep(8.0, 26.0, aD) * (1.0 - smoothstep(62.0, 120.0, aD));
+  p.y += c * grow * 1.5;
+  vCrest = c * grow;
+  vWorld = p;
+  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+}`;
+
+const SURF_FRAG = /* glsl */ `
+varying float vD;
+varying float vCrest;
+varying vec3 vWorld;
+uniform vec3 uDeep, uShallow, uSun, uFog, uCamera;
+uniform float uTime, uFogNear, uFogFar;
+float n(vec2 p) { return sin(p.x + 0.9 * sin(p.y * 0.63)) * sin(p.y + 0.9 * sin(p.x * 0.71)); }
+void main() {
+  vec2 p = vWorld.xz;
+  float w = n(p * vec2(0.09, 0.5) + uTime * 0.4) + 0.5 * n(p * vec2(0.23, 1.1) - uTime * 0.6);
+  vec3 c = mix(uShallow, uDeep, smoothstep(6.0, 90.0, vD) + w * 0.08);
+  /* La schiuma: sulla cresta che rompe, e a merletto sull'ultima lingua d'acqua. */
+  float lace = smoothstep(0.1, 0.8, w) * (1.0 - smoothstep(6.0, 22.0, vD));
+  float top = smoothstep(0.42, 0.86, vCrest + w * 0.05) * (1.0 - smoothstep(46.0, 74.0, vD));
+  c = mix(c, vec3(1.0, 0.975, 0.93) + uSun * 0.04, clamp(top + lace, 0.0, 1.0));
+  c += uSun * smoothstep(1.05, 1.4, w) * 0.4;
+  c = mix(c, uFog, smoothstep(uFogNear, uFogFar, distance(vWorld, uCamera)));
+  gl_FragColor = vec4(c, 1.0 - smoothstep(84.0, 118.0, vD));
+  #include <colorspace_fragment>
+}`;
+
+/* L'invecchiamento dei luoghi, nel materiale: mattoni con la malta, conci di
+   pietra, chiazze, colature, sporco che sale da terra. Lontano si spegne, così
+   non sfarfalla. */
+const WEAR_HEAD = /* glsl */ `
+varying float vSurf;
+varying vec3 vWp;
+float wHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(wHash(i), wHash(i + vec2(1, 0)), f.x), mix(wHash(i + vec2(0, 1)), wHash(i + vec2(1, 1)), f.x), f.y);
+}`;
+
+const WEAR_BODY = /* glsl */ `
+{
+  vec3 fn = normalize(cross(dFdx(vWp), dFdy(vWp)));
+  float up = abs(fn.y);
+  float along = abs(fn.x) > abs(fn.z) ? vWp.z : vWp.x;
+  vec2 q = up > 0.7 ? vWp.xz : vec2(along, vWp.y);
+  float blotch = wNoise(q * 0.32) * 0.6 + wNoise(q * 1.1) * 0.4;
+  float k = 0.86 + blotch * 0.26;
+  if (up < 0.7) {
+    float streak = wNoise(vec2(along * 1.4, vWp.y * 0.07));
+    k *= 1.0 - smoothstep(0.55, 0.85, streak) * 0.22;
+    k *= 0.62 + 0.38 * smoothstep(0.0, 3.2, vWp.y);
+    float fade = 1.0 - smoothstep(0.03, 0.2, fwidth(vWp.y) + fwidth(along));
+    if (vSurf > 0.5 && vSurf < 1.5) {
+      vec2 b = vec2(along / 0.66, vWp.y / 0.26);
+      b.x += mod(floor(b.y), 2.0) * 0.5;
+      vec2 f = fract(b);
+      float tone = wHash(floor(b));
+      float joint = smoothstep(0.0, 0.08, f.x) * smoothstep(0.0, 0.08, 1.0 - f.x) * smoothstep(0.0, 0.14, f.y) * smoothstep(0.0, 0.14, 1.0 - f.y);
+      k *= mix(1.0, (0.8 + tone * 0.34) * mix(1.5, 1.0, joint), fade);
+    } else if (vSurf > 1.5) {
+      vec2 b = vec2(along / 1.5, vWp.y / 0.62);
+      b.x += mod(floor(b.y), 2.0) * 0.5;
+      vec2 f = fract(b);
+      float tone = wHash(floor(b));
+      float joint = smoothstep(0.0, 0.03, f.x) * smoothstep(0.0, 0.03, 1.0 - f.x) * smoothstep(0.0, 0.06, f.y) * smoothstep(0.0, 0.06, 1.0 - f.y);
+      k *= mix(1.0, (0.92 + tone * 0.14) * mix(0.72, 1.0, joint), fade);
+    }
+  }
+  diffuseColor.rgb *= k;
+}`;
+
 const SEA_VERT = /* glsl */ `
 varying vec3 vWorld;
 uniform float uTime;
@@ -241,7 +430,7 @@ const SEA_FRAG = /* glsl */ `
 varying vec3 vWorld;
 uniform vec3 uDeep, uShallow, uSun, uFog, uCamera;
 uniform float uTime, uFogNear, uFogFar;
-float n(vec2 p) { return sin(p.x) * sin(p.y); }
+float n(vec2 p) { return sin(p.x + 0.9 * sin(p.y * 0.63)) * sin(p.y + 0.9 * sin(p.x * 0.71)); }
 void main() {
   vec2 p = vWorld.xz;
   float w = n(p * 0.21 + uTime * 0.5) + 0.6 * n(p * 0.47 - uTime * 0.7) + 0.35 * n(p * 1.1 + uTime);
@@ -408,15 +597,15 @@ void main() {
   vec2 p = (vUv - 0.5) / 0.86 + 0.5;
   vec3 c = vec3(1.0, 0.973, 0.882);
   if (p.x > 0.0 && p.x < 1.0 && p.y > 0.0 && p.y < 1.0) {
-    vec2 uv = (vCell + p) / uCells;
-    c = texture2D(uAtlas, vec2(uv.x, 1.0 - uv.y + 0.0)).rgb;
+    vec2 uv = (vCell + vec2(p.x, 1.0 - p.y)) / uCells;
+    c = texture2D(uAtlas, vec2(uv.x, 1.0 - uv.y)).rgb;
   }
   gl_FragColor = vec4(c, 1.0);
   #include <colorspace_fragment>
 }`;
 
 /* ---------- Il mondo ---------- */
-export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onReady }) {
+export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onReady, onThanks, onHold }) {
   const timeline = buildTimeline(chapters);
   const { prints, beats, finale, total, distanceAt, end } = timeline;
   const palettes = preparePalettes();
@@ -426,6 +615,10 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isPhone, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isPhone ? 1.6 : 1.75));
 
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
+
   const world = new THREE.Scene();
   world.fog = new THREE.Fog(0xffffff, 70, 330);
   const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 1200);
@@ -433,6 +626,15 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 2);
   const key = new THREE.DirectionalLight(0xffffff, 1.4);
   world.add(hemi, key, key.target);
+  key.castShadow = true;
+  key.shadow.mapSize.setScalar(isPhone ? 1024 : 2048);
+  key.shadow.camera.left = key.shadow.camera.bottom = -170;
+  key.shadow.camera.right = key.shadow.camera.top = 170;
+  key.shadow.camera.near = 10;
+  key.shadow.camera.far = 620;
+  key.shadow.bias = -0.0008;
+  key.shadow.normalBias = 0.5;
+  key.shadow.radius = isPhone ? 3 : 6;
 
   /* Toon a tre toni: il mondo resta un'illustrazione. */
   const ramp = new THREE.DataTexture(new Uint8Array([185, 225, 255]), 3, 1, THREE.RedFormat);
@@ -458,46 +660,57 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   sky.renderOrder = -10;
   world.add(sky);
 
-  /* Terra e strada */
-  /* Acqua a destra della strada: il fiume, l'estuario, l'oceano. */
-  const waterZones = beats.filter((b) => b.water).map((b) => ({ s0: b.s0 - 24, s1: b.landmark === "tiber" || b.landmark === "belem" ? b.s1 + 34 : b.zoneEnd + 60, beach: !!b.beach }));
-  const seaAmount = (s) => Math.max(0, ...waterZones.map((z) => smooth(z.s0 - 30, z.s0 + 10, s) * (1 - smooth(z.s1 - 10, z.s1 + 30, s))));
-  const beachAmount = (s) => Math.max(0, ...waterZones.filter((z) => z.beach).map((z) => smooth(z.s0 - 30, z.s0 + 10, s) * (1 - smooth(z.s1 - 10, z.s1 + 30, s))));
-  const shoreDrop = (o, s) => {
-    const steep = o > 12 ? -11 * smooth(12, 20, o) : 0;
-    const gentle = o > 8 ? -11 * smooth(8, 42, o) : 0;
-    return lerp(steep, gentle, beachAmount(s)) * seaAmount(s);
-  };
-  const lastS = end + 520;
-  const firstS = -160;
-
-  const groundMat = flat(0xffffff);
-  const ground = new THREE.Mesh(
-    ribbon(firstS, lastS, 5, [-520, -130, -34, -6.5, 6.5, 8, 12, 16, 20, 26, 34, 42, 130, 520], (o, s) => {
-      return -0.07 + shoreDrop(o, s);
-    }),
-    groundMat
+  /* Terra e acqua: la terra è una lastra ritagliata sui contorni della mappa,
+     l'acqua sta più in basso e si vede dove la lastra manca. */
+  const shape = outlines();
+  const toVec = ([x, z]) => new THREE.Vector2(x, -z);
+  const landGeo = mergeGeometries(
+    CITIES.map((c) => {
+      const [x0, z0, x1, z1] = c.box;
+      const m = 900;
+      const outline = c.sea ? shape.lisbonLand.map(toVec) : [[x0 - m, z0 - m], [x1 + m, z0 - m], [x1 + m, z1 + m], [x0 - m, z1 + m]].map(toVec);
+      const plate = new THREE.Shape(outline);
+      if (c.river) plate.holes.push(new THREE.Path(shape.river.map(toVec)));
+      const g = new THREE.ShapeGeometry(plate);
+      g.rotateX(-Math.PI / 2);
+      g.translate(0, -0.07, 0);
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) g.attributes.uv.setXY(i, p.getX(i) / 60, p.getZ(i) / 60);
+      return g;
+    })
   );
+  const groundMat = flat(0xffffff, { side: THREE.DoubleSide, map: groundTexture(isPhone ? 256 : 512) });
+  const ground = new THREE.Mesh(landGeo, groundMat);
   ground.frustumCulled = false;
   world.add(ground);
 
-  const roadMat = flat(0xffffff);
-  const road = new THREE.Mesh(ribbon(firstS, lastS, 2.5, [-4.3, 4.3], () => 0), roadMat);
-  road.frustumCulled = false;
-  const paintMat = flat("#fff8e1");
-  const lineL = new THREE.Mesh(ribbon(firstS, lastS, 2.5, [-4.05, -3.9], () => 0.03), paintMat);
-  const lineR = new THREE.Mesh(ribbon(firstS, lastS, 2.5, [3.9, 4.05], () => 0.03), paintMat);
-  const centre = new THREE.Mesh(dashes(firstS, lastS), paintMat);
-  [lineL, lineR, centre].forEach((m) => (m.frustumCulled = false));
-  world.add(road, lineL, lineR, centre);
-
-  /* Sabbia */
-  const sandMat = flat("#ecd6a4");
-  for (const z of waterZones.filter((w) => w.beach)) {
-    const sand = new THREE.Mesh(ribbon(z.s0, z.s1, 5, [6.4, 8, 12, 16, 20, 26, 34, 42], (o, s) => -0.03 + shoreDrop(o, s)), sandMat);
-    sand.frustumCulled = false;
-    world.add(sand);
+  /* Una fascia tra due linee: argini e spiaggia. */
+  function strip(a, b, ya, yb) {
+    const pos = [];
+    for (let i = 0; i < a.length - 1; i++) {
+      const q = [[a[i], ya], [a[i + 1], ya], [b[i], yb], [a[i + 1], ya], [b[i + 1], yb], [b[i], yb]];
+      for (const [[x, z], y] of q) pos.push(x, y, z);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    return g;
   }
+  const shift = (line, dz) => line.map(([x, z]) => [x, z + dz]);
+  const riverLoop = [...shape.river, shape.river[0]];
+  const bankMat = flat("#cbbd9e", { side: THREE.DoubleSide });
+  const banks = new THREE.Mesh(
+    mergeGeometries([strip(riverLoop, riverLoop, -0.07, -5), ...shape.hard.map((c) => strip(c, c, -0.07, -5))]),
+    bankMat
+  );
+  banks.frustumCulled = false;
+  world.add(banks);
+
+  /* Sabbia: un po' sulla terra, poi giù verso l'acqua. */
+  const sandMat = flat("#ecd6a4", { side: THREE.DoubleSide });
+  const wetMat = flat("#a98a5e", { side: THREE.DoubleSide });
+  const sand = new THREE.Mesh(mergeGeometries([strip(shift(shape.sand, -72), shape.sand, -0.03, -0.03), strip(shape.sand, shift(shape.sand, 30), -0.03, -1.6)]), sandMat);
+  sand.frustumCulled = false;
+  world.add(sand);
 
   /* Acqua */
   const seaMat = new THREE.ShaderMaterial({
@@ -514,25 +727,152 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       uFogFar: { value: 330 },
     },
   });
-  const sea = waterZones.length ? { material: seaMat } : null;
-  for (const z of waterZones) {
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(1200, z.s1 - z.s0 + 40, 60, Math.ceil((z.s1 - z.s0) / 10)), seaMat);
+  const sea = { material: seaMat };
+  for (const c of CITIES.filter((x) => x.sea || x.river)) {
+    const [x0, z0, x1, z1] = c.box;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 + 1800, z1 - z0 + 1800, 90, 60), seaMat);
     plane.rotation.x = -Math.PI / 2;
-    plane.position.set(540, -4.2, -(z.s0 + z.s1) / 2);
+    /* Il mare sta poco sotto la terra: più in basso, con la camera raso terra,
+       il bordo della lastra lo nasconderebbe. */
+    plane.position.set((x0 + x1) / 2, c.sea ? -0.75 : -1.8, (z0 + z1) / 2);
     plane.frustumCulled = false;
     world.add(plane);
   }
 
+  /* La risacca lungo la sabbia. */
+  {
+    const pts = [];
+    const line = shape.sand;
+    for (let i = 0; i < line.length - 1; i++) {
+      const [ax, az] = line[i];
+      const [bx, bz] = line[i + 1];
+      const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 7);
+      for (let k = 0; k < n; k++) pts.push([lerp(ax, bx, k / n), lerp(az, bz, k / n)]);
+    }
+    pts.push(line[line.length - 1]);
+    const rows = 26;
+    const pos = [];
+    const ds = [];
+    const idx = [];
+    pts.forEach(([x, z], i) => {
+      for (let r = 0; r < rows; r++) {
+        const d = 10 + r * r * 0.18;
+        pos.push(x, -0.7, z + d);
+        ds.push(d);
+        if (i < pts.length - 1 && r < rows - 1) {
+          const a = i * rows + r;
+          idx.push(a, a + 1, a + rows, a + 1, a + rows + 1, a + rows);
+        }
+      }
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("aD", new THREE.Float32BufferAttribute(ds, 1));
+    g.setIndex(idx);
+    const surf = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SURF_VERT, fragmentShader: SURF_FRAG, uniforms: seaMat.uniforms, transparent: true, side: THREE.DoubleSide }));
+    surf.frustumCulled = false;
+    world.add(surf);
+    /* La sabbia bagnata fa da specchio scuro prima dell'acqua. */
+    const wet = new THREE.Mesh(strip(shift(shape.sand, 3), shift(shape.sand, 15), -0.17, -0.77), wetMat);
+    wet.frustumCulled = false;
+    world.add(wet);
+  }
+
+  /* La strada: selciato, cordolo di pietra, marciapiede. Sotto l'aula e sui
+     ponti il marciapiede sparisce. */
+  const along = (offsets, height) => mergeGeometries(legs.map((l) => ribbon(l.start, l.end, 2.5, offsets, height)));
+  const tilePx = isPhone ? 512 : 1024;
+  const roadMat = flat(0xffffff, { side: THREE.DoubleSide, map: cobbleTexture(tilePx) });
+  const road = new THREE.Mesh(along([-ROAD_HALF, ROAD_HALF], () => 0), roadMat);
+  road.frustumCulled = false;
+  const sunk = (s) => {
+    const p = roadPoint(s);
+    return !onLand(p.x, p.z, 8) || beats.some((b) => b.through && Math.abs(s - b.s) < 38);
+  };
+  const walkMat = flat(0xffffff, { side: THREE.DoubleSide, map: pavingTexture(tilePx) });
+  const kerbY = (s) => (sunk(s) ? -0.8 : 0.15);
+  const walk = new THREE.Mesh(mergeGeometries([along([ROAD_HALF, WALK_HALF], (o, s) => kerbY(s)), along([-WALK_HALF, -ROAD_HALF], (o, s) => kerbY(s))]), walkMat);
+  walk.frustumCulled = false;
+  const paintMat = flat("#fff8e1", { side: THREE.DoubleSide });
+  const kerb = new THREE.Mesh(
+    mergeGeometries(
+      [1, -1].flatMap((e) => [
+        along([e * ROAD_HALF, e * ROAD_HALF * 0.999], (o, s) => (Math.abs(o) > ROAD_HALF * 0.9995 ? kerbY(s) : 0)),
+        along(e > 0 ? [ROAD_HALF, ROAD_HALF + 0.4] : [-ROAD_HALF - 0.4, -ROAD_HALF], (o, s) => kerbY(s) + 0.01),
+      ])
+    ),
+    paintMat
+  );
+  kerb.frustumCulled = false;
+  world.add(road, walk, kerb);
+
+  /* Una griglia per sapere in fretta se un punto è vicino alla strada o a un
+     muro. */
+  const CELL = 24;
+  const cellOf = (x, z) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+  function grid() {
+    const cells = new Map();
+    return {
+      add(x, z, item) {
+        const k = cellOf(x, z);
+        if (!cells.has(k)) cells.set(k, []);
+        cells.get(k).push(item);
+      },
+      some(x, z, reach, test) {
+        const n = Math.ceil(reach / CELL);
+        const cx = Math.floor(x / CELL);
+        const cz = Math.floor(z / CELL);
+        for (let i = -n; i <= n; i++) {
+          for (let j = -n; j <= n; j++) {
+            const list = cells.get(`${cx + i},${cz + j}`);
+            if (list && list.some(test)) return true;
+          }
+        }
+        return false;
+      },
+    };
+  }
+  const roadGrid = grid();
+  for (const l of legs) {
+    for (let i = 0; i < l.xs.length; i += 3) roadGrid.add(l.xs[i], l.zs[i], [l.xs[i], l.zs[i]]);
+  }
+  const nearRoad = (x, z, r) => roadGrid.some(x, z, r, ([a, b]) => Math.hypot(a - x, b - z) < r);
+  const wallGrid = grid();
+  const addWall = (x, z, r) => wallGrid.add(x, z, { x, z, r });
+  const hitsWall = (x, z, r) => wallGrid.some(x, z, 40, (w) => Math.hypot(w.x - x, w.z - z) < w.r + r);
+
   /* Paesaggio: istanze ripartite per tratto di strada. */
-  const instances = { hill: [], tree: [], trunk: [], pine: [], pineTrunk: [], hedge: [], post: [], car: [], salmon: [], coral: [], ochre: [], rust: [], lisbon: [] };
+  const instances = { hill: [], tree: [], trunk: [], pine: [], pineTrunk: [], hedge: [], post: [], car: [], deck: [], vase: [], bloom: [], roof: [], salmon: [], coral: [], ochre: [], rust: [], red: [], brick: [], yellowBrick: [], lisbon: [], lisbonY: [], lisbonB: [] };
   const lampPoints = [];
   const dummy = new THREE.Object3D();
   const rng = mulberry(2026);
 
-  function put(kind, s, offset, y, sx, sy, sz, color, rotY = 0) {
+  const BUILDINGS = ["salmon", "coral", "ochre", "rust", "red", "brick", "yellowBrick", "lisbon", "lisbonY", "lisbonB"];
+  /* Ora che la strada gira, quello che sta di fianco a un tratto può cadere
+     sopra un altro tratto, in acqua o dentro un luogo. */
+  const free = (x, z, r) => onLand(x, z, r) && !onBeachFront(x, z) && !hitsWall(x, z, r) && !nearRoad(x, z, r + 6) && !beats.some((b) => Math.hypot(b.place[0] - x, b.place[1] - z) < (CLEARING[b.landmark] ?? 58) + r);
+
+  function put(kind, s, offset, y, sx, sy, sz, color, rotY = 0, always = false) {
     const p = roadPoint(s, new THREE.Vector3());
     const d = roadDir(s, new THREE.Vector3());
-    dummy.position.set(p.x - d.z * offset, p.y + y, p.z + d.x * offset);
+    const x = p.x - d.z * offset;
+    const z = p.z + d.x * offset;
+    const isBuilding = BUILDINGS.includes(kind);
+    const reach = isBuilding ? Math.max(sx, sz) * 0.62 : kind === "hill" ? sx * 0.7 : Math.max(sx, sz);
+    if (isBuilding) {
+      /* Una casa sta a filo marciapiede: il controllo guarda la sua pianta. */
+      const open = (a, b) => !nearRoad(x + a, z + b, WALK_HALF - 1.2);
+      const fx = d.x * sx * 0.45;
+      const fz = d.z * sx * 0.45;
+      const ox = -d.z * sz * 0.42;
+      const oz = d.x * sz * 0.42;
+      if (!onLand(x, z, 9) || onBeachFront(x, z) || !open(0, 0) || !open(fx, fz) || !open(-fx, -fz) || !open(ox, oz) || !open(-ox, -oz)) return;
+      if (beats.some((b) => Math.hypot(b.place[0] - x, b.place[1] - z) < (CLEARING[b.landmark] ?? 58) + reach * 0.6)) return;
+    } else if (always === "street") {
+      if (!onLand(x, z, 2) || beats.some((b) => Math.hypot(b.place[0] - x, b.place[1] - z) < (CLEARING[b.landmark] ?? 58) * 0.75)) return;
+    } else if (!always && !free(x, z, reach)) return;
+    if (isBuilding) addWall(x, z, Math.max(sx, sz) * 0.52);
+    dummy.position.set(x, p.y + y, z);
     dummy.scale.set(sx, sy, sz);
     dummy.rotation.set(0, rotY, 0);
     dummy.updateMatrix();
@@ -545,9 +885,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     return Math.atan2(-d.x, -d.z);
   };
   /* I luoghi si tengono attorno un po' di vuoto, altrimenti non si vedono. */
-  const blocked = (s, side) => beats.some((b) => Math.abs(s - b.s) < (b.through ? 44 : 62) && (b.through || !b.spec.side || b.side === side));
+  const blocked = (s, side) => beats.some((b) => Math.abs(s - b.s) < (b.through ? 44 : 62) && (b.through || b.side === side));
   const nearStop = (s) => beats.some((b) => Math.abs(s - b.s) < 78);
-  const wet = (s, side) => side > 0 && seaAmount(s) > 0.01;
+  const wet = () => false;
 
   function hills(s0, s1, colors, every = 15) {
     for (let s = s0; s < s1; s += every) {
@@ -580,13 +920,19 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     }
   }
 
-  function buildings(s0, s1, styles, sides = [1, -1], min = 19, every = 19, floors = [16, 24]) {
+  function buildings(s0, s1, styles, sides = [1, -1], min = 7.7, every = 19, floors = [18, 26]) {
     for (const side of sides) {
       for (let s = s0; s < s1; s += every) {
-        if (wet(s, side) || blocked(s, side) || beats.some((b) => Math.abs(s - b.s) < 50)) continue;
-        const w = every - 1;
+        if (blocked(s, side) || beats.some((b) => Math.abs(s - b.s) < 50)) continue;
         const h = floors[0] + rng() * (floors[1] - floors[0]);
-        put(pick(styles), s, side * (min + 8), h / 2, w, h, 14, "#ffffff", heading(s));
+        const r = heading(s);
+        const before = instances.roof.length;
+        const style = pick(styles);
+        const total = Object.values(instances).reduce((n, l) => n + l.length, 0);
+        put(style, s, side * (min + 8), h / 2, every + 0.5, h, 16, "#ffffff", r);
+        if (Object.values(instances).reduce((n, l) => n + l.length, 0) > total && before === instances.roof.length) {
+          put("roof", s, side * (min + 8), h + 1.5, every + 1.6, 3, 17.4, pick(["#b5683f", "#a85a35", "#c2734a", "#9c5232"]), r, true);
+        }
       }
     }
   }
@@ -594,36 +940,50 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   function cars(s0, s1, every, sides = [1]) {
     for (let s = s0; s < s1; s += every) {
       const side = pick(sides);
-      if (rng() < 0.3 || blocked(s, side) || wet(s, side) || nearStop(s)) continue;
-      put("car", s, side * 5.6, 0.62, 1, 1, 1, pick(["#8b8f94", "#4c5660", "#e9e9ea", "#a33434", "#23272d", "#23305f"]), heading(s));
+      if (rng() < 0.3 || blocked(s, side) || nearStop(s)) continue;
+      put("car", s, side * 3.25, 0.62, 1, 1, 1, pick(["#8b8f94", "#4c5660", "#e9e9ea", "#a33434", "#23272d", "#23305f"]), heading(s), "street");
     }
   }
 
-  function streetLamps(s0, s1, every, sides = [1, -1], offset = 5.2) {
-    for (let s = s0; s < s1; s += every) {
+  function streetLamps(s0, s1, every, sides = [1, -1], offset = 5.1) {
+    for (let s = s0; s < s1; s += every * (isPhone ? 1.7 : 1)) {
       for (const side of sides) {
-        if (blocked(s, side) || wet(s, side) || nearStop(s)) continue;
-        put("post", s, side * offset, 3.3, 0.07, 3.3, 0.07, "#3a3d44");
+        if (blocked(s, side) || nearStop(s)) continue;
+        const before = instances.post.length;
+        put("post", s, side * offset, 0, 1, 1, 1, "#1d1f22", 0, "street");
+        if (instances.post.length === before) continue;
         const p = roadPoint(s, new THREE.Vector3());
         const d = roadDir(s, new THREE.Vector3());
-        const o = side * (offset - 0.8);
-        lampPoints.push(p.x - d.z * o, p.y + 6.7, p.z + d.x * o);
+        lampPoints.push(p.x - d.z * side * offset, p.y + 5.5, p.z + d.x * side * offset);
       }
     }
   }
 
+  /* I vasi di fiori lungo il marciapiede, davanti alle case. */
+  function vases(s0, s1, every) {
+    for (let s = s0; s < s1; s += every * (isPhone ? 2 : 1)) {
+      const side = rng() < 0.5 ? -1 : 1;
+      if (blocked(s, side) || nearStop(s)) continue;
+      const before = instances.vase.length;
+      const o = side * (6.9 + rng() * 0.3);
+      put("vase", s, o, 0.15, 1, 1, 1, "#a79f90", 0, "street");
+      if (instances.vase.length > before) put("bloom", s, o, 1.36, 0.62, 0.42, 0.62, pick(["#8a5fd0", "#c7a6e0", "#e8588f", "#f2b632"]), rng() * 6, true);
+    }
+  }
+
   for (const c of chapters) {
-    const a = c.s0 - 20;
-    const b = c.s1 + 20;
+    const a = c.s0;
+    const b = c.s1;
     if (c.scenery === "romeStreet") {
-      buildings(a, b, ["salmon", "salmon", "ochre"]);
+      buildings(a, b, ["salmon", "salmon", "ochre", "brick"]);
+      buildings(a, b, ["salmon", "ochre"], [1, -1], 25, 21, [22, 30]);
+      cars(a, b, 9, [1, -1]);
+      streetLamps(a, b, 26);
+      vases(a, b, 15);
       pines(a, b, 17);
-      cars(a, b, 6.5, [1, -1]);
-      streetLamps(a, b, 30);
-      hills(a, b, ["#b9a98f"], 22);
     }
     if (c.scenery === "melfi") {
-      buildings(a, b, ["coral"], [1], 17, 20, [11, 15]);
+      buildings(a, b, ["coral", "coral", "salmon"], [1], 7.7, 20, [12, 16]);
       /* Dall'altro lato la ferrovia, con la siepe davanti. */
       const ballast = new THREE.Mesh(ribbon(a, b, 5, [-13.5, -9], () => 0.04), flat("#8a8378"));
       const rails = [[-12.4, -12.26], [-10.6, -10.46]].map((o) => new THREE.Mesh(ribbon(a, b, 5, o, () => 0.14), flat("#4e4a46")));
@@ -631,36 +991,40 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
         m.frustumCulled = false;
         world.add(m);
       });
-      for (let s = a; s < b; s += 2.6) if (!nearStop(s)) put("hedge", s, -7.2 - rng() * 0.6, 0.5, 1.5 + rng(), 0.9 + rng() * 0.8, 1.7, pick(["#5d8a3e", "#4f7d38", "#6c9a46"]));
+      for (let s = a; s < b; s += 2.6) if (!nearStop(s)) put("hedge", s, -8.2 - rng() * 0.6, 0.6, 1.5 + rng(), 0.9 + rng() * 0.8, 1.7, pick(["#5d8a3e", "#4f7d38", "#6c9a46"]));
       for (let s = a; s < b; s += 9) {
         const k = 2 + rng() * 1.6;
         const o = -16 - rng() * 20;
         put("trunk", s, o, 1.2 * k, 0.28 * k, 1.3 * k, 0.28 * k, "#5a4030");
         put("tree", s, o, 3.3 * k, 2 * k, 2 * k, 2 * k, pick(["#3f6e3a", "#35623a", "#4b7d40"]), rng() * 6);
       }
-      streetLamps(a, b, 26, [-1], 5.6);
-      cars(a, b, 12, [1]);
+      streetLamps(a, b, 26, [-1], 5.1);
+      cars(a, b, 14, [1]);
       hills(a, b, ["#7f9652", "#8ca35a", "#6e8a4e"], 12);
     }
     if (c.scenery === "romeCity") {
-      buildings(a, b, ["ochre", "rust", "ochre"]);
+      buildings(a, b, ["ochre", "rust", "red", "brick", "yellowBrick", "ochre"]);
+      buildings(a, b, ["ochre", "rust", "red"], [1, -1], 25, 21, [24, 34]);
+      buildings(a, b, ["ochre", "rust"], [1, -1], 43, 24, [26, 38]);
+      cars(a, b, 13, [1, -1]);
+      streetLamps(a, b, 24);
+      vases(a, b, 13);
       pines(a, b, 21);
-      trees(a, b, ["#4f8a46", "#5f9c50"], 17);
-      streetLamps(a, b, 30);
-      cars(a, b, 11, [1, -1]);
-      hills(a, b, ["#a9a07c", "#8fa066"], 18);
     }
     if (c.scenery === "lisbon") {
-      buildings(a, b, ["lisbon"], [1, -1], 15, 19, [13, 19]);
+      buildings(a, b, ["lisbon", "lisbonY", "lisbonB", "lisbon", "yellowBrick"], [1, -1], 7.7, 19, [15, 22]);
+      /* Dietro, il resto della città: file di tetti di cotto che salgono. */
+      buildings(a, b, ["lisbon", "lisbonY"], [1, -1], 25, 23, [20, 28]);
+      buildings(a, b, ["lisbon", "lisbonB"], [1, -1], 43, 27, [24, 34]);
+      streetLamps(a, b, 22);
+      vases(a, b, 17);
       trees(a, b, ["#6f9c50", "#82a852"], 22);
-      streetLamps(a, b, 24);
-      hills(a, b, ["#d9c28a", "#cfae7a", "#b8a070"], 12);
     }
   }
 
   const facadeMaterial = (style) => {
-    const side = new THREE.MeshLambertMaterial({ map: facadeTexture(style) });
-    const top = new THREE.MeshLambertMaterial({ color: "#cfc3ae" });
+    const side = new THREE.MeshLambertMaterial({ map: facadeTexture(style, !isPhone) });
+    const top = new THREE.MeshLambertMaterial({ color: style === "lisbon" ? "#bd6a42" : "#cfc3ae" });
     return [side, side, top, top, side, side];
   };
   const pineShape = mergeGeometries(
@@ -675,6 +1039,18 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     [new THREE.BoxGeometry(3.9, 0.7, 1.7), new THREE.BoxGeometry(2, 0.55, 1.5).translate(-0.2, 0.6, 0)].map((g) => g.toNonIndexed())
   );
   const lit = () => new THREE.MeshLambertMaterial({ color: "#ffffff" });
+  /* Il lampione di ghisa a tre lanterne, e il vaso di pietra. */
+  const turned = (points, seg = 10) => new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), seg);
+  const lampShape = mergeGeometries(
+    [
+      turned([[0.3, 0], [0.26, 0.5], [0.13, 0.9], [0.09, 1.4], [0.07, 5.2], [0, 5.2]], 6),
+      new THREE.BoxGeometry(1.5, 0.05, 0.05).translate(0, 5.05, 0),
+      new THREE.BoxGeometry(0.05, 0.05, 1.5).translate(0, 5.05, 0),
+      ...[[0.72, 0], [-0.72, 0], [0, 0.72], [0, -0.72]].map(([x, z]) => turned([[0.09, 0], [0.2, 0.5], [0, 0.72]], 4).translate(x, 5.1, z)),
+    ].map((g) => g.toNonIndexed())
+  );
+  lampShape.deleteAttribute("uv");
+  const vaseShape = turned([[0.3, 0], [0.34, 0.08], [0.12, 0.2], [0.12, 0.42], [0.42, 0.7], [0.58, 1.1], [0.62, 1.2], [0.5, 1.2]], 8);
   const shapes = {
     hill: [new THREE.IcosahedronGeometry(1, 2), toon("#ffffff")],
     tree: [new THREE.IcosahedronGeometry(1, 1), toon("#ffffff")],
@@ -682,10 +1058,18 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     pine: [pineShape, lit()],
     pineTrunk: [new THREE.CylinderGeometry(0.75, 1, 2, 6), lit()],
     hedge: [new THREE.IcosahedronGeometry(1, 1), lit()],
-    post: [new THREE.CylinderGeometry(1, 1, 2, 5), flat("#ffffff")],
+    post: [lampShape, lit()],
+    vase: [vaseShape, lit()],
+    bloom: [new THREE.IcosahedronGeometry(1, 1), toon("#ffffff")],
+    roof: [(() => {
+      const g = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4);
+      g.rotateY(Math.PI / 4);
+      return g.toNonIndexed();
+    })(), lit()],
     car: [carShape, lit()],
+    deck: [new THREE.BoxGeometry(1, 1, 1), lit()],
   };
-  for (const style of ["salmon", "coral", "ochre", "rust", "lisbon"]) shapes[style] = [new THREE.BoxGeometry(1, 1, 1), facadeMaterial(style)];
+  for (const style of BUILDINGS) shapes[style] = [new THREE.BoxGeometry(1, 1, 1), facadeMaterial(style)];
 
   for (const [kind, list] of Object.entries(instances)) {
     if (!list.length) continue;
@@ -695,15 +1079,31 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       mesh.setColorAt(i, item.color);
     });
     mesh.frustumCulled = false;
+    if (!isPhone && (BUILDINGS.includes(kind) || kind === "tree" || kind === "pine" || kind === "post" || kind === "car")) mesh.castShadow = true;
+    if (!isPhone && (BUILDINGS.includes(kind) || kind === "roof")) mesh.receiveShadow = true;
     world.add(mesh);
   }
 
   /* I luoghi. */
-  const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const vLocal = new THREE.Vector3();
+  /* Sopra 1 di proposito: le tinte dei palazzi sono quelle vere, e la luce
+     dell'illustrazione da sola le spegnerebbe. */
+  const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, color: new THREE.Color(1.28, 1.28, 1.28) });
+  solidMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>\nattribute float aSurf;\nvarying float vSurf;\nvarying vec3 vWp;`)
+      .replace("#include <begin_vertex>", `#include <begin_vertex>\nvSurf = aSurf;\nvWp = (modelMatrix * vec4(position, 1.0)).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>\n${WEAR_HEAD}`)
+      .replace("#include <color_fragment>", `#include <color_fragment>\n${WEAR_BODY}`);
+  };
   const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   for (const b of beats) {
     b.entry = buildLandmark(b.landmark, solidMat, glowMat);
     const g = b.entry.group;
+    g.traverse((o) => {
+      if (o.isMesh && o.material === solidMat) o.castShadow = o.receiveShadow = true;
+    });
     const p = roadPoint(b.s);
     const d = roadDir(b.s);
     const rightX = -d.z;
@@ -713,7 +1113,33 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     g.rotation.y = b.through ? Math.atan2(-d.x, -d.z) + Math.PI / 2 : Math.atan2(-rightX * b.side, -rightZ * b.side);
     b.centre = g.position.clone().setY(g.position.y + b.spec.look);
     world.add(g);
+    /* Certi luoghi si guardano verso qualcos'altro: la spiaggia verso il forte. */
+    if (b.spec.aim) {
+      g.updateMatrixWorld(true);
+      b.centre.copy(g.localToWorld(new THREE.Vector3(...b.spec.aim)));
+    }
+    /* I muri del luogo, come una fila di cerchi lungo ogni massa. */
+    g.updateMatrixWorld(true);
+    for (const m of b.entry.masses) {
+      const r = Math.min(m.w, m.d) / 2;
+      const n = Math.ceil(Math.max(m.w, m.d) / Math.min(m.w, m.d));
+      for (let i = 0; i < n; i++) {
+        const k = n > 1 ? i / (n - 1) - 0.5 : 0;
+        vLocal.set(m.x + (m.w > m.d ? k * (m.w - m.d) : 0), 0, m.z + (m.d > m.w ? k * (m.d - m.w) : 0));
+        g.localToWorld(vLocal);
+        addWall(vLocal.x, vLocal.z, r);
+      }
+    }
   }
+
+  /* La terra è disegnata senza luce: le ombre le riceve questo velo, che segue
+     il pulmino. */
+  const shade = new THREE.Mesh(new THREE.PlaneGeometry(760, 760), new THREE.ShadowMaterial({ color: "#2a2233", opacity: 0.34 }));
+  shade.rotation.x = -Math.PI / 2;
+  shade.position.y = 0.11;
+  shade.receiveShadow = true;
+  shade.renderOrder = 1;
+  world.add(shade);
 
   /* Lampioni: dischi morbidi additivi. */
   const lampGeo = new THREE.BufferGeometry();
@@ -743,10 +1169,12 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
   /* Traguardo */
   const arch = new THREE.Group();
+  const archLifted = { y: 0 };
   {
     const p = roadPoint(end - 22);
     const d = roadDir(end - 22);
     arch.position.copy(p);
+    archLifted.y = p.y;
     arch.rotation.y = Math.atan2(-d.x, -d.z);
     const postMat = toon("#fff8e1");
     for (const x of [-5.4, 5.4]) {
@@ -817,6 +1245,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   pmrem.dispose();
   const bus = createBus(renderer, studio);
   world.add(bus.root);
+  bus.root.traverse((o) => {
+    if (o.isMesh) o.castShadow = true;
+  });
 
   /* ---------- Le stampe ---------- */
   const printGeo = new THREE.PlaneGeometry(1, 1, 22, 16);
@@ -1055,7 +1486,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   world.add(selfie.mesh);
   /* 0 muro, 1 festa. shot misura il volo dalla camera al centro, hold la pausa
      prima della scritta, thanks la scritta che si compone. */
-  const party = { value: 0, target: 0, shot: 1, hold: 0, thanks: 0 };
+  const party = { value: 0, target: 0, shot: 1, hold: 0, wait: 0, thanks: 0 };
 
   /* ---------- Il volo di foto tra un luogo e l'altro ----------
      Stampe che arrivano dal fondo e superano la camera. Vivono nello spazio
@@ -1113,7 +1544,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   function updateFlight(position, time) {
     const FLIGHT_IN = 0.95;
     const FLIGHT_OUT = 0.85;
-    const stop = beats.find((b, i) => i > 0 && position > b.u0 - FLIGHT_IN && position < b.u0 + FLIGHT_OUT);
+    /* Davanti ad Aula Chiesa niente foto in volo: la si vede arrivare. */
+    const stop = beats.find((b, i) => i > 0 && !b.through && position > b.u0 - FLIGHT_IN && position < b.u0 + FLIGHT_OUT);
     if (!stop || !atlasUsed.length) {
       flight.visible = false;
       return;
@@ -1282,6 +1714,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   let velocity = 0;
   let last = performance.now();
   let focused = null;
+  let shadowTick = 0;
   let jolt = 0;
   let unlocked = false;
   const pointer = new THREE.Vector2();
@@ -1327,8 +1760,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     skyLook.set(Math.sin(mix.sunAz) * Math.cos(mix.sunEl), Math.sin(mix.sunEl), -Math.cos(mix.sunAz) * Math.cos(mix.sunEl));
     skyUniforms.uSunDir.value.copy(skyLook);
     world.fog.color.copy(mix.low);
-    groundMat.color.copy(mix.ground);
-    roadMat.color.copy(mix.road);
+    groundMat.color.copy(mix.ground).lerp(mix.road, 0.22).lerp(mix.hemi, 0.1);
+    roadMat.color.copy(mix.road).lerp(mix.hemi, 0.32).multiplyScalar(1.5);
+    walkMat.color.copy(mix.hemi).multiplyScalar(0.55 + mix.hemiI * 0.16);
     hemi.color.copy(mix.hemi);
     hemi.groundColor.copy(mix.hemiLow);
     hemi.intensity = mix.hemiI;
@@ -1338,13 +1772,16 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     lamps.visible = mix.lamps > 0.02;
     glowMat.color.setScalar(0.28 + mix.lamps * 0.85);
     sandMat.color.set("#ecd6a4").lerp(mix.low, 0.25).multiplyScalar(clamp(mix.hemiI / 2, 0.45, 1));
-    paintMat.color.set("#fff8e1").lerp(mix.road, 0.25);
+    wetMat.color.copy(sandMat.color).lerp(mix.mid, 0.45).multiplyScalar(0.72);
+    paintMat.color.set("#cfc8b8").lerp(mix.road, 0.3);
     if (sea) {
       const su = sea.material.uniforms;
       su.uSun.value.copy(mix.sun);
       su.uFog.value.copy(mix.low);
-      su.uDeep.value.set("#17609e").lerp(mix.top, 0.45);
-      su.uShallow.value.set("#4cc0d0").lerp(mix.mid, 0.45);
+      /* Col sole basso il mare smette di essere azzurro e prende il cielo. */
+      const low = 1 - smooth(0.03, 0.3, mix.sunEl);
+      su.uDeep.value.set("#17609e").lerp(mix.top, 0.45 + low * 0.4);
+      su.uShallow.value.set("#4cc0d0").lerp(mix.mid, 0.45 + low * 0.2).lerp(mix.low, low * 0.5);
     }
   }
 
@@ -1421,17 +1858,155 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     camera.updateProjectionMatrix();
     airUniforms.uPixels.value = vh * renderer.getPixelRatio() * 0.9;
     layoutWall();
-    syncHeight();
   }
 
-  function syncHeight() {
-    if (!unlocked) return;
-    document.getElementById("runway").style.height = `${(total * SCROLL_VH_PER_UNIT + 100) * (vh / 100)}px`;
+  /* ---------- I passi ----------
+     Le soste del viaggio: la foto a fuoco, il luogo inquadrato, il muro finale.
+     place è la posizione tra una sosta e l'altra, want quella chiesta dai tocchi:
+     con un tocco alla volta il ritmo è costante, e ogni tocco in più in coda
+     accorcia il tratto. */
+  const stops = [
+    0,
+    ...prints.map((p) => p.a + 0.45),
+    ...beats.map((b) => (b.u0 + b.u1) / 2),
+    total,
+  ].sort((a, b) => a - b);
+  let place = 0;
+  let want = 0;
+
+  const stepAt = (x) => {
+    const i = clamp(Math.floor(x), 0, stops.length - 2);
+    return lerp(stops[i], stops[i + 1], x - i);
+  };
+
+  /* Il pulmino non parte prima della musica: vedi hold() in main.js. */
+  let waitingMusic = true;
+
+  function moveSteps(dt) {
+    if (waitingMusic) return;
+    const left = want - place;
+    if (!left) return;
+    /* Il tratto verso il finale è il più lungo: gli serve un po' più di tempo. */
+    const span = stops[clamp(Math.floor(place), 0, stops.length - 2) + 1] - stops[clamp(Math.floor(place), 0, stops.length - 2)];
+    const stretch = span > 3 ? 2.2 : 1;
+    const speed = (Math.max(1, Math.abs(left) * 1.6) / (STEP_TIME * stretch)) * dt;
+    place += Math.sign(left) * Math.min(Math.abs(left), speed);
+    target = stepAt(place);
   }
 
-  function readScroll() {
-    const room = document.documentElement.scrollHeight - vh;
-    target = unlocked && room > 0 ? (window.scrollY / room) * total : 0;
+  function step(by) {
+    if (!unlocked || roam.on) return;
+    want = clamp(Math.round(want) + by, 0, waitingMusic ? 1 : stops.length - 1);
+  }
+
+  /* Ciò che ha un suo comando tiene il suo tocco. */
+  const own = (e) => !!e.target.closest?.("button, a, input, iframe, .booth, .lightbox, .roam-map, .roam-pad");
+  const press = { id: null, y: 0, moved: false, timer: 0 };
+  window.addEventListener("pointerdown", (e) => {
+    if (own(e) || roam.on) return;
+    press.id = e.pointerId;
+    press.y = e.clientY;
+    press.moved = false;
+    /* Tenuto premuto: la foto a fuoco, ingrandita. */
+    press.timer = setTimeout(() => {
+      press.moved = true;
+      onHold?.();
+    }, HOLD_MS);
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== press.id) return;
+    const dy = press.y - e.clientY;
+    if (Math.abs(dy) < SWIPE_PX) return;
+    clearTimeout(press.timer);
+    press.moved = true;
+    press.y = e.clientY;
+    step(Math.sign(dy));
+  });
+  const lift = (e) => {
+    if (e.pointerId !== press.id) return;
+    clearTimeout(press.timer);
+    press.id = null;
+    if (!press.moved && e.type === "pointerup") step(1);
+  };
+  window.addEventListener("pointerup", lift);
+  window.addEventListener("pointercancel", lift);
+
+  /* La rotella: uno scatto, un passo, anche se il trackpad manda molti eventi. */
+  let wheelSum = 0;
+  let wheelAt = 0;
+  window.addEventListener("wheel", (e) => {
+    const now = performance.now();
+    if (now - wheelAt > 180) wheelSum = 0;
+    wheelSum += e.deltaY;
+    if (Math.abs(wheelSum) >= 40 && now - wheelAt > 70) {
+      wheelAt = now;
+      step(Math.sign(wheelSum));
+      wheelSum = 0;
+    }
+  }, { passive: true });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.target.closest?.("button, input")) return;
+    if (["ArrowDown", "ArrowRight", "PageDown", " "].includes(e.key)) {
+      e.preventDefault();
+      step(1);
+    }
+    if (["ArrowUp", "ArrowLeft", "PageUp"].includes(e.key)) {
+      e.preventDefault();
+      step(-1);
+    }
+  });
+
+  /* ---------- La guida libera ----------
+     Si apre solo dopo la scritta: prima il viaggio, in ordine. */
+  const roam = { on: false, blend: 0, x: 0, z: 0, h: 0, camH: 0, v: 0, gas: 0, steer: 0, odo: 0, sky: 0, snap: true, turnDone: false };
+
+  function updateRoam(dt) {
+    const want = roam.gas > 0 ? roam.gas * DRIVE.top : roam.gas * DRIVE.reverse;
+    const rate = roam.gas === 0 ? DRIVE.drag : Math.sign(want) === Math.sign(roam.v) || roam.v === 0 ? DRIVE.accel : DRIVE.brake;
+    roam.v += clamp(want - roam.v, -rate * dt, rate * dt);
+    /* Si sterza in proporzione alla velocità, e al contrario in retromarcia. */
+    roam.h += roam.steer * DRIVE.turn * dt * clamp(roam.v / 12, -1, 1);
+    const nx = roam.x + Math.sin(roam.h) * roam.v * dt;
+    const nz = roam.z - Math.cos(roam.h) * roam.v * dt;
+    /* Sull'acqua si passa solo dai ponti. */
+    const ok = (onLand(nx, nz, 3) || nearRoad(nx, nz, 7)) && !hitsWall(nx, nz, 2.4);
+    if (ok) {
+      roam.x = nx;
+      roam.z = nz;
+      roam.odo += roam.v * dt;
+    } else {
+      roam.v *= -0.25;
+      jolt = 0.7;
+    }
+    let diff = roam.h - roam.camH;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    roam.camH += diff * (1 - Math.exp(-dt * 3.4));
+
+    /* Il cielo è quello del luogo più vicino. */
+    let near = null;
+    let nearD = 340;
+    for (const b of beats) {
+      const d = Math.hypot(b.place[0] - roam.x, b.place[1] - roam.z);
+      if (d < nearD) {
+        nearD = d;
+        near = b;
+      }
+    }
+    if (near) {
+      if (roam.snap) roam.sky = near.u1;
+      roam.sky += (near.u1 - roam.sky) * (1 - Math.exp(-dt * 0.9));
+      roam.snap = false;
+    }
+  }
+
+  function placeBus(s) {
+    roadPoint(s, vA);
+    roadDir(s, vB);
+    roam.x = vA.x;
+    roam.z = vA.z;
+    roam.h = roam.camH = Math.atan2(vB.x, -vB.z);
+    roam.v = 0;
   }
 
   /* ---------- Il fotogramma ---------- */
@@ -1441,7 +2016,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     last = now;
     const t = now / 1000;
 
-    /* Lo scroll arriva a scatti, il pulmino no. */
+    moveSteps(dt);
+    /* I passi arrivano a scatti, il pulmino no. */
     const before = u;
     u += (target - u) * (1 - Math.exp(-dt * 5.5));
     if (Math.abs(target - u) < 0.0004) u = target;
@@ -1451,23 +2027,34 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     party.value += (party.target - party.value) * (1 - Math.exp(-dt * 2.2));
     party.shot = Math.min(1, party.shot + dt / 1.9);
     if (selfie.ready && party.shot >= 1) party.hold += dt;
-    if (party.hold > 2.4) party.thanks = Math.min(1, party.thanks + dt / 4.4);
+    /* Senza foto la scritta arriva lo stesso, dopo un momento davanti al muro:
+       chi non vuole farsi fotografare non deve perdersi il resto. */
+    party.wait = u > total - 0.4 ? party.wait + dt : 0;
+    if (party.hold > 2.4 || (!selfie.ready && party.wait > 7)) party.thanks = Math.min(1, party.thanks + dt / 4.4);
+    roam.blend = clamp(roam.blend + (roam.on ? dt : -dt) / 1.6, 0, 1);
+    if (roam.on) updateRoam(dt);
 
     pointerSmooth.lerp(pointer, 0.07);
-    currentSky(u);
+    const skyAt = roam.on ? roam.sky : u;
+    currentSky(skyAt);
     applySky();
-    currentAir(u);
+    currentAir(skyAt);
 
-    const s = distanceAt(u);
-    roadPoint(s, pBus);
-    roadDir(s, pDir);
+    const s = roam.on ? roam.odo : distanceAt(u);
+    if (roam.on) {
+      pBus.set(roam.x, 0, roam.z);
+      pDir.set(Math.sin(roam.camH), 0, -Math.cos(roam.camH));
+    } else {
+      roadPoint(s, pBus);
+      roadDir(s, pDir);
+    }
     pRight.set(-pDir.z, 0, pDir.x).normalize();
 
     /* Pulmino */
     jolt *= Math.exp(-dt * 5);
     const engine = u < INTRO_UNITS ? 0.012 : 0.02 * (0.4 + speed);
     bus.root.position.copy(pBus);
-    bus.root.rotation.y = Math.atan2(-pDir.x, -pDir.z) + Math.PI / 2;
+    bus.root.rotation.y = (roam.on ? Math.atan2(-Math.sin(roam.h), Math.cos(roam.h)) : Math.atan2(-pDir.x, -pDir.z)) + Math.PI / 2;
     bus.pose.rotation.z = clamp(velocity * 0.006, -0.02, 0.02) + jolt * 0.035;
     bus.body.position.y = Math.sin(t * 16) * engine * 0.3 + Math.sin(t * 2.3) * 0.01;
     bus.body.rotation.x = Math.sin(t * 1.7) * 0.004 + clamp(pDir.x * 0.05, -0.02, 0.02);
@@ -1479,34 +2066,42 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
     /* Camera: di fianco al pulmino parcheggiato, poi dietro; tra un capitolo e
        l'altro gli gira intorno. */
-    const stop = beats.find((b) => u >= b.u0 && u < b.u1);
+    const stop = roam.on ? null : beats.find((b) => u >= b.u0 && u < b.u1);
     const gap = stop ? (u - stop.u0) / (stop.u1 - stop.u0) : 0;
     const gapShape = stop ? Math.pow(Math.sin(gap * Math.PI), 0.7) : 0;
     /* In tappa la camera sta dalla parte opposta al luogo, con il pulmino
        davanti e il luogo dietro. Dentro l'aula resta in scia, bassa. */
     const orbitSide = stop && !stop.through ? -stop.side : 1;
-    const orbit = stop?.through ? 0 : 1.15;
+    const orbit = stop?.through ? 0 : stop?.spec.view?.orbit ?? 1.15;
     const intro = 1 - smooth(0.2, INTRO_UNITS, u);
     let theta = lerp(0.2, 1.38, intro) + orbitSide * gapShape * orbit;
     theta += pointerSmooth.x * 0.05;
     const R = Math.min((lerp(10.5, 9.6, intro) + gapShape * (stop?.through ? -1 : 4.5)) * fit, lerp(40, stop?.through ? 9 : 17, gapShape));
     const height = Math.max(1.5, lerp(3.3, 2.1, intro) - gapShape * 1.4) + pointerSmooth.y * -0.2;
+    const view = stop?.spec.view;
+    const radius = view ? lerp(R, view.r, gapShape) : R;
     camera.position
       .copy(pBus)
-      .addScaledVector(pDir, -Math.cos(theta) * R)
-      .addScaledVector(pRight, Math.sin(theta) * R);
-    camera.position.y = pBus.y + height;
+      .addScaledVector(pDir, -Math.cos(theta) * radius)
+      .addScaledVector(pRight, Math.sin(theta) * radius);
+    camera.position.y = pBus.y + (view ? lerp(height, view.h, gapShape) : height);
     pLook.copy(pBus).addScaledVector(pDir, lerp(4.5, 0, intro));
     pLook.y = pBus.y + lerp(1.8, 1.4, intro);
-    if (stop && !stop.through) pLook.lerp(stop.centre, gapShape * (camera.aspect < 1 ? 0.22 : 0.6));
+    if (stop && !stop.through) pLook.lerp(stop.centre, gapShape * (view ? 0.72 : camera.aspect < 1 ? 0.22 : 0.6));
 
     for (const b of beats) {
-      b.entry.group.visible = Math.abs(s - b.s) < 330;
-      if (b.entry.mover) b.entry.mover.position.x = lerp(-20, 20, clamp((u - b.u0) / (b.u1 - b.u0), 0, 1));
+      const away = Math.hypot(b.place[0] - pBus.x, b.place[1] - pBus.z);
+      b.entry.group.visible = away < (isPhone ? 300 : 430);
+      /* I luoghi salgono piano dopo piano mentre ci si avvicina, come l'Emma. */
+      b.entry.group.scale.y = Math.max(0.001, easeInOut(1 - smooth(isPhone ? 170 : 230, isPhone ? 290 : 410, away)));
+      if (b.entry.mover) {
+        const e = b.entry;
+        e.mover.position.x = e.moverBase + (roam.on ? Math.sin(t * 0.3) : lerp(-1, 1, clamp((u - b.u0) / (b.u1 - b.u0), 0, 1))) * e.moverRange;
+      }
     }
 
     /* Finale: la camera arretra e guarda il muro di foto. */
-    const finaleT = smooth(finale + 0.2, finale + 2.6, u);
+    const finaleT = smooth(finale + 0.2, finale + 2.6, u) * (1 - easeInOut(roam.blend));
     if (finaleT > 0) {
       const closeUp = easeInOut(smooth(0.08, 0.7, party.thanks));
       const wallDist = Math.max(wall.h / (2 * Math.tan(THREE.MathUtils.degToRad(23))), wall.w / (2 * Math.tan(THREE.MathUtils.degToRad(23)) * camera.aspect)) * lerp(1.5, 1.08, closeUp);
@@ -1519,7 +2114,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     }
 
     /* Tagliato il traguardo, lo striscione si alza e libera la vista. */
-    arch.position.y = roadY(end - 22) + finaleT * finaleT * 34;
+    arch.position.y = archLifted.y + Math.max(finaleT * finaleT, roam.blend) * 34;
 
     camera.fov = 46 + speed * 9 + gapShape * (stop?.through ? 8 : 12);
     camera.updateProjectionMatrix();
@@ -1529,8 +2124,16 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     camUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
     camRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
 
-    key.position.copy(pBus).addScaledVector(skyLook, 100);
+    /* Il sole basso allungherebbe le ombre all'infinito: per loro si ferma più in alto. */
+    vC.set(skyLook.x, Math.max(skyLook.y, 0.5), skyLook.z).normalize();
+    key.position.copy(pBus).addScaledVector(vC, 300);
     key.target.position.copy(pBus);
+    shade.position.x = pBus.x;
+    shade.position.z = pBus.z;
+    shade.material.opacity = 0.36 * clamp(mix.keyI / 1.2, 0.1, 1);
+    /* Il mondo sta fermo: l'ombra si ricalcola ogni tanto, non a ogni fotogramma. */
+    shadowTick = (shadowTick + 1) % (isPhone ? 10 : 4);
+    if (!shadowTick) renderer.shadowMap.needsUpdate = true;
     airUniforms.uCamera.value.copy(camera.position);
     airUniforms.uTime.value = t;
     if (sea) {
@@ -1765,13 +2368,17 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     }
 
     onProgress?.(u / total, u);
+    const thanked = party.thanks >= 1 && u > total - 0.2;
+    if (thanked !== roam.turnDone) {
+      roam.turnDone = thanked;
+      onThanks?.(thanked);
+    }
 
     renderer.render(world, camera);
   }
 
   /* ---------- Avvio ---------- */
   window.addEventListener("resize", resize);
-  window.addEventListener("scroll", readScroll, { passive: true });
   if (window.matchMedia("(hover: hover)").matches) {
     window.addEventListener("pointermove", (e) => {
       pointer.set((e.clientX / Math.max(vw, 1)) * 2 - 1, (e.clientY / Math.max(vh, 1)) * 2 - 1);
@@ -1794,10 +2401,6 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     unlock() {
       if (unlocked) return;
       unlocked = true;
-      syncHeight();
-      /* Si comincia sempre dal pulmino parcheggiato, anche ricaricando. */
-      window.scrollTo(0, 0);
-      readScroll();
     },
     get unlocked() {
       return unlocked;
@@ -1818,9 +2421,44 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       party.thanks = celebrate ? 0 : 1;
       if (!celebrate) party.value = 1;
     },
-    /* Primo tratto dopo il tocco sul pulmino. */
-    departureY() {
-      return (INTRO_UNITS / total) * (document.documentElement.scrollHeight - vh);
+    /* La guida libera. */
+    enterRoam() {
+      if (roam.on) return;
+      placeBus(end);
+      roam.sky = beats[beats.length - 1].u1;
+      roam.snap = true;
+      roam.on = true;
+    },
+    exitRoam() {
+      roam.on = false;
+      roam.v = roam.gas = roam.steer = 0;
+    },
+    drive(gas, steer) {
+      roam.gas = gas;
+      roam.steer = steer;
+    },
+    /* Salta davanti a un luogo della mappa. */
+    jumpTo(landmark) {
+      const b = beats.find((x) => x.landmark === landmark);
+      if (!b) return;
+      placeBus(b.s - BEAT_ROAD);
+      roam.snap = true;
+      roam.sky = b.u1;
+    },
+    get bus() {
+      return roam;
+    },
+    /* La strada, per la cartina. */
+    lines() {
+      return legs.map((l) => ({ city: l.city, points: l.xs.filter((_, i) => i % 12 === 0).map((x, i) => [x, l.zs[i * 12]]) }));
+    },
+    /* Il tocco su Play è il primo passo. */
+    advance() {
+      step(1);
+    },
+    /* La musica c'è: il pulmino può muoversi. */
+    release() {
+      waitingMusic = false;
     },
   };
 }

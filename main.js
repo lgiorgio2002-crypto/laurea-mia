@@ -3,10 +3,13 @@
 import { CHAPTERS, SONG, WALL_API } from "./chapters.js";
 import { createBooth } from "./booth.js";
 import { createMusic } from "./music.js";
+import { createRoam } from "./roam.js";
 import { createWall } from "./wall.js";
 
+/* Quanto si aspetta Spotify prima di partire senza. */
+const MUSIC_WAIT_MS = 3000;
+
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-history.scrollRestoration = "manual";
 
 const start = document.getElementById("start");
 const sound = document.getElementById("sound");
@@ -170,6 +173,7 @@ async function buildJourney(chapters, key, rawKey, numbers) {
   const { createJourney } = await import("./journey.js");
   let focused = null;
   let booth = null;
+  let roam = null;
 
   const journey = createJourney({
     canvas: document.getElementById("stage"),
@@ -182,6 +186,14 @@ async function buildJourney(chapters, key, rawKey, numbers) {
       focused = print;
       document.documentElement.classList.toggle("has-focus", !!print);
     },
+    /* La guida libera si apre solo qui: finito il viaggio, vista la scritta. */
+    onThanks(done) {
+      roam?.setAvailable(done);
+    },
+    /* Un tocco è un passo: per ingrandire la foto la si tiene premuta. */
+    onHold() {
+      if (focused?.src) openLightbox(focused.src, focused.alt, document.getElementById("stage"));
+    },
     onProgress(fraction, u) {
       hud.style.setProperty("--progress", fraction.toFixed(4));
       hudBus.style.transform = `translateX(calc(${(fraction * 100).toFixed(2)}cqw - 50%))`;
@@ -193,15 +205,16 @@ async function buildJourney(chapters, key, rawKey, numbers) {
     },
   });
 
-  /* Tocco sulla foto a fuoco: ingrandita, senza cornice né effetti. */
-  document.getElementById("stage").addEventListener("click", () => {
-    if (focused?.src) openLightbox(focused.src, focused.alt, document.getElementById("stage"));
-  });
+  roam = createRoam({ journey });
+
+  /* Il primo gesto fa partire la canzone; il pulmino aspetta di sentirla. */
+  const go = () => music.whenPlaying(MUSIC_WAIT_MS).then(() => journey.release());
+  for (const type of ["pointerup", "keydown"]) window.addEventListener(type, go, { once: true });
 
   start.addEventListener("click", () => {
     music.unlock();
     journey.kick();
-    if (journey.unlocked) window.scrollTo({ top: journey.departureY(), behavior: "smooth" });
+    journey.advance();
   });
 
   if (!key) return;

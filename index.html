@@ -35,6 +35,12 @@ html {
   overflow-anchor: none;
 }
 
+.is-ready {
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: #ffd9b8;
@@ -54,7 +60,7 @@ button {
   border-radius: 10px;
 }
 
-/* La pagina è solo una pista per lo scroll: tutto accade nel canvas fisso. */
+/* Si avanza a tocchi: la pagina non scorre, tutto accade nel canvas fisso. */
 #runway {
   height: 100lvh;
 }
@@ -321,6 +327,118 @@ button {
   z-index: 40;
 }
 
+/* La guida libera. */
+.share__button.roam-start {
+  position: fixed;
+  left: 50%;
+  top: calc(18px + env(safe-area-inset-top));
+  width: auto;
+  padding: 13px 28px;
+  transform: translateX(-50%);
+  background: var(--sun);
+  color: var(--ink);
+  z-index: 41;
+}
+
+.roam-pad,
+.roam-leave,
+.roam-mini {
+  display: none;
+}
+
+.is-roaming {
+  overflow: hidden;
+}
+
+.is-roaming .camera,
+.is-roaming .after,
+.is-roaming .share,
+.is-roaming .hud,
+.is-roaming .hint {
+  display: none !important;
+}
+
+.is-roaming .roam-pad {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  touch-action: none;
+}
+
+.roam-stick {
+  position: fixed;
+  left: -56px;
+  top: -56px;
+  width: 112px;
+  height: 112px;
+  border: 3px solid rgba(255, 248, 225, 0.85);
+  border-radius: 50%;
+  z-index: 31;
+  pointer-events: none;
+}
+
+.roam-stick i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px;
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  background: var(--sun);
+  transform: translate(var(--dx, 0), var(--dy, 0));
+}
+
+.is-roaming .roam-leave {
+  display: grid;
+  position: fixed;
+  left: 16px;
+  top: calc(16px + env(safe-area-inset-top));
+  width: 50px;
+  height: 50px;
+  z-index: 45;
+}
+
+.is-roaming .roam-mini {
+  display: block;
+  position: fixed;
+  right: 16px;
+  top: calc(16px + env(safe-area-inset-top));
+  width: 128px;
+  height: 128px;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  background: var(--cream);
+  box-shadow: 0 10px 18px -10px rgba(43, 38, 34, 0.6);
+  cursor: pointer;
+  z-index: 45;
+}
+
+.roam-map {
+  position: fixed;
+  inset: 0;
+  padding: calc(72px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  background: var(--cream);
+  z-index: 60;
+}
+
+.roam-map__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.roam-map__close {
+  position: absolute;
+  right: 22px;
+  top: calc(22px + env(safe-area-inset-top));
+  width: 46px;
+  height: 46px;
+}
+
 /* Qui il testo c'è: mostrare un volto agli altri è una scelta, e va capita. */
 .share__button {
   width: 100%;
@@ -553,6 +671,21 @@ button {
   <button class="share__button" id="shareButton" type="button" hidden>Mostra a tutti</button>
   <button class="share__button share__remove" id="unshareButton" type="button" hidden>Togli la mia foto</button>
   <p class="share__note">La vedrà chi scansiona il QR della tesi.</p>
+</div>
+
+<button class="share__button roam-start" id="roamButton" type="button" hidden>Esplora</button>
+
+<div class="roam-pad" id="roamPad" aria-hidden="true"></div>
+<div class="roam-stick" id="roamStick" aria-hidden="true" hidden><i></i></div>
+<button class="round roam-leave" id="roamLeave" type="button" aria-label="Torna al traguardo">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+</button>
+<canvas class="roam-mini" id="roamMini" role="button" aria-label="Apri la cartina"></canvas>
+<div class="roam-map" id="roamMap" role="dialog" aria-label="La cartina: tocca un luogo per andarci" hidden>
+  <canvas class="roam-map__canvas" id="roamMapCanvas"></canvas>
+  <button class="round roam-map__close" id="roamMapClose" type="button" aria-label="Chiudi la cartina">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+  </button>
 </div>
 
 <div class="booth" id="booth" role="dialog" aria-modal="true" aria-label="Fotocamera" hidden>

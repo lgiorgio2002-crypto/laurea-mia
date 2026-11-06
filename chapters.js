@@ -3,7 +3,8 @@
 // from, to: le foto del capitolo, per numero. L'ordine è quello dei numeri.
 // stops:    le tappe. before è la foto davanti a cui il pulmino rallenta e la
 //           camera mostra il luogo (nome in landmarks.js). sky è il momento
-//           della giornata che comincia lì (PALETTES).
+//           della giornata che comincia lì (PALETTES). Dove sta ogni luogo
+//           è scritto in map.js.
 // scenery:  il paesaggio lungo la strada, tra una tappa e l'altra.
 // grade:    la pellicola delle foto: 0 colore pieno, 1 stampa antica.
 // neon:     quanto le foto risentono delle luci della notte.
@@ -55,12 +56,14 @@ export const CHAPTERS = [
     neon: 0.25,
     stops: [
       { landmark: "luissVilla", before: 10, sky: "morning" },
-      { landmark: "luissHouse", before: 12, sky: "noon" },
+      { landmark: "luissGlass", before: 12, sky: "noon" },
       { landmark: "aula", before: 14, sky: "afternoon" },
-      { landmark: "tiber", before: 16, sky: "sunset", water: true },
-      { landmark: "colosseum", before: 18, sky: "night" },
+      { landmark: "tiber", before: 16, sky: "sunset" },
+      { landmark: "vittoriano", before: 17, sky: "sunset" },
+      { landmark: "colosseum", before: 18, sky: "morning" },
       { landmark: "pantheon", before: 20, sky: "morning" },
-      { landmark: "tower", before: 23, sky: "afternoon" },
+      { landmark: "tower", before: 21, sky: "afternoon" },
+      { landmark: "spagna", before: 23, sky: "dusk" },
     ],
   },
   {
@@ -73,11 +76,11 @@ export const CHAPTERS = [
     neon: 0,
     stops: [
       { landmark: "tram", before: 24, sky: "noon" },
-      { landmark: "belem", before: 26, sky: "afternoon", water: true },
-      { landmark: "comercio", before: 27, sky: "dusk" },
-      { landmark: "nova", before: 29, sky: "morning", water: true, beach: true },
-      { landmark: "carcavelos", before: 31, sky: "gold", water: true, beach: true },
-      { landmark: "sunsetBeach", before: 32, sky: "sunset", water: true, beach: true },
+      { landmark: "belem", before: 26, sky: "sunset" },
+      { landmark: "comercio", before: 27, sky: "morning" },
+      { landmark: "nova", before: 29, sky: "morning" },
+      { landmark: "carcavelos", before: 31, sky: "noon" },
+      { landmark: "sunsetBeach", before: 32, sky: "golden" },
     ],
   },
 ];
@@ -93,8 +96,9 @@ export const PALETTES = {
   afternoon: { top: "#4f9fe0", mid: "#ffe2a0", low: "#ffefbd", ground: "#b4b552", road: "#4d4640", sun: "#fff0b8", sunEl: 0.26, sunAz: -0.5, hemi: "#fff3cf", hemiLow: "#c9a255", hemiI: 2.1, keyI: 1.6, stars: 0, lamps: 0 },
   dusk: { top: "#2c2a6b", mid: "#c9559b", low: "#ff9a6b", ground: "#4a3560", road: "#2d2738", sun: "#ffc27a", sunEl: 0.03, sunAz: 0.1, hemi: "#c98ac9", hemiLow: "#54306f", hemiI: 1.3, keyI: 0.7, stars: 0.35, lamps: 0.6 },
   night: { top: "#070a24", mid: "#141a4a", low: "#2a2467", ground: "#14143a", road: "#1d1c33", sun: "#eaeaff", sunEl: 0.5, sunAz: 0.3, hemi: "#6a78e0", hemiLow: "#2a1f5e", hemiI: 1.1, keyI: 0.35, stars: 1, lamps: 1 },
-  noon: { top: "#2f8fe0", mid: "#8fd3f2", low: "#d9f1f2", ground: "#e4d29a", road: "#51504e", sun: "#ffffff", sunEl: 0.8, sunAz: 0.5, hemi: "#ffffff", hemiLow: "#e6d6a8", hemiI: 2.3, keyI: 1.6, stars: 0, lamps: 0 },
+  noon: { top: "#2f8fe0", mid: "#8fd3f2", low: "#d9f1f2", ground: "#b9bd8c", road: "#51504e", sun: "#ffffff", sunEl: 0.8, sunAz: 0.5, hemi: "#ffffff", hemiLow: "#e6d6a8", hemiI: 2.3, keyI: 1.6, stars: 0, lamps: 0 },
   sunset: { top: "#3b3a86", mid: "#ef6f6c", low: "#ffb26b", ground: "#7a4f52", road: "#3a2c36", sun: "#ffd28a", sunEl: 0.03, sunAz: 0.55, hemi: "#ffb48a", hemiLow: "#6a3a5e", hemiI: 1.5, keyI: 1, stars: 0.15, lamps: 0.3 },
+  golden: { top: "#74ada6", mid: "#a9cdb6", low: "#f3dcae", ground: "#c9b27a", road: "#4a4038", sun: "#fff0c8", sunEl: 0.12, sunAz: 0.6, hemi: "#ffe9c8", hemiLow: "#b89a6e", hemiI: 2, keyI: 1.2, stars: 0, lamps: 0.1 },
   gold: { top: "#ffb627", mid: "#ffd43b", low: "#ffe98a", ground: "#e8b92c", road: "#3a342f", sun: "#fff8e1", sunEl: 0.3, sunAz: 0, hemi: "#fff3cf", hemiLow: "#e0a93c", hemiI: 2.3, keyI: 1.5, stars: 0, lamps: 0 },
 };
 

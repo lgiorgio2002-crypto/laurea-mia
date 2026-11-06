@@ -8,6 +8,8 @@ export function createMusic({ container, song, onChange }) {
   let controller = null;
   let unlocked = false;
   let heardAt = 0;
+  let waiters = [];
+  let lastPosition = -1;
   const state = { playing: false, everStarted: false, duration: 0 };
 
   const isPreview = () => state.duration > 0 && state.duration <= PREVIEW_MAX_MS;
@@ -17,6 +19,12 @@ export function createMusic({ container, song, onChange }) {
     state.duration = data.duration;
     state.playing = !data.isPaused && !data.isBuffering && data.position < data.duration;
     if (state.playing) state.everStarted = true;
+    /* "In riproduzione" arriva prima del suono: vale solo se la canzone avanza. */
+    if (state.playing && data.position > lastPosition && lastPosition >= 0) {
+      waiters.forEach((go) => go());
+      waiters = [];
+    }
+    lastPosition = state.playing ? data.position : -1;
     onChange({ ...state, preview: isPreview() });
 
     const end = song.end && !isPreview() ? song.end * 1000 : data.duration;
@@ -59,6 +67,14 @@ export function createMusic({ container, song, onChange }) {
       if (unlocked) return;
       unlocked = true;
       start();
+    },
+    /* Si risolve quando la musica si sente davvero, o dopo maxMs: senza Spotify
+       il viaggio deve partire lo stesso. */
+    whenPlaying(maxMs) {
+      return new Promise((go) => {
+        waiters.push(go);
+        setTimeout(go, maxMs);
+      });
     },
     toggle() {
       if (!unlocked) {
