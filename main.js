@@ -1,6 +1,6 @@
 // L'avvio: chiave, foto cifrate, musica, e la scelta tra il viaggio 3D e la
 // versione semplice (movimento ridotto, oppure WebGL assente).
-import { CHAPTERS, SONG, WALL_API } from "./chapters.js";
+import { CHAPTERS, FINALE_SONG, SONG, WALL_API } from "./chapters.js";
 import { createBooth } from "./booth.js";
 import { createMusic } from "./music.js";
 import { createRoam } from "./roam.js";
@@ -8,6 +8,9 @@ import { createWall } from "./wall.js";
 
 /* Quanto si aspetta Spotify prima di partire senza. */
 const MUSIC_WAIT_MS = 3000;
+/* Quanto si resta in un capitolo prima di cambiare canzone: chi fa avanti e
+   indietro sul confine non sente dieci attacchi. */
+const SONG_SETTLE_MS = 700;
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -26,6 +29,7 @@ const music = createMusic({
   song: SONG,
   onChange({ playing, everStarted }) {
     if (!everStarted) return;
+    document.documentElement.classList.remove("needs-player");
     sound.hidden = false;
     sound.classList.toggle("is-paused", !playing);
     sound.setAttribute("aria-label", playing ? "Metti in pausa la musica" : "Fai ripartire la musica");
@@ -168,6 +172,25 @@ function buildSimple(chapters, key) {
   });
 }
 
+/* ---------- Una canzone per capitolo ----------
+   createJourney scrive su ogni capitolo dove comincia (u0) e finisce (u1).
+   Dove un capitolo non ne ha una suona SONG; dal GRAZIE in poi FINALE_SONG. */
+function createSongSwitch(route) {
+  let wanted = SONG;
+  let timer = 0;
+  return {
+    at(u) {
+      /* Prima della partenza suona già la canzone del primo capitolo. */
+      const here = u < route[0].u0 ? route[0] : route.find((c) => u >= c.u0 && u < c.u1);
+      const song = here ? here.song ?? SONG : FINALE_SONG;
+      if (song === wanted) return;
+      wanted = song;
+      clearTimeout(timer);
+      timer = setTimeout(() => music.setSong(wanted), SONG_SETTLE_MS);
+    },
+  };
+}
+
 /* ---------- Il viaggio ---------- */
 async function buildJourney(chapters, key, rawKey, numbers) {
   const { createJourney } = await import("./journey.js");
@@ -175,10 +198,13 @@ async function buildJourney(chapters, key, rawKey, numbers) {
   let booth = null;
   let roam = null;
 
+  /* Senza chiave si vede il pulmino e si sente la musica, nient'altro. */
+  const route = chapters.length ? chapters : CHAPTERS.map((c) => ({ ...c, photos: [] }));
+  const songs = createSongSwitch(route);
+
   const journey = createJourney({
     canvas: document.getElementById("stage"),
-    /* Senza chiave si vede il pulmino e si sente la musica, nient'altro. */
-    chapters: chapters.length ? chapters : CHAPTERS.map((c) => ({ ...c, photos: [] })),
+    chapters: route,
     onReady() {
       document.documentElement.classList.add("is-ready");
     },
@@ -202,13 +228,20 @@ async function buildJourney(chapters, key, rawKey, numbers) {
       const arrived = fraction > 0.985;
       document.documentElement.classList.toggle("has-arrived", arrived);
       booth?.setArrived(arrived);
+      songs.at(u);
     },
   });
 
   roam = createRoam({ journey });
 
   /* Il primo gesto fa partire la canzone; il pulmino aspetta di sentirla. */
-  const go = () => music.whenPlaying(MUSIC_WAIT_MS).then(() => journey.release());
+  const go = () =>
+    music.whenPlaying(MUSIC_WAIT_MS).then(() => {
+      journey.release();
+      /* Se il telefono blocca il player nascosto, lo si mostra: un tocco dentro
+         il player di Spotify vale sempre. */
+      if (!music.heard) document.documentElement.classList.add("needs-player");
+    });
   for (const type of ["pointerup", "keydown"]) window.addEventListener(type, go, { once: true });
 
   start.addEventListener("click", () => {

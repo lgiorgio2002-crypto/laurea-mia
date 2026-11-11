@@ -290,9 +290,15 @@ class Kit {
 
   /* Una figura di pietra, con le ali se è un angelo del ponte. */
   statue(x, y, z, hex, h = 3, wings = false) {
-    this.cyl(0.26 * h, 0.62 * h, x, y, z, hex, 8, 0.09 * h);
-    this.sphere(0.09 * h, x, y + 0.72 * h, z, hex);
-    this.box(0.5 * h, 0.08 * h, 0.1 * h, x + 0.14 * h, y + 0.56 * h, z + 0.05 * h, hex, 0.5);
+    /* La veste che cade, il busto con le spalle, la testa, un braccio lungo
+       il fianco e l'altro teso in avanti. */
+    this.cyl(0.17 * h, 0.5 * h, x, y, z, hex, 10, 0.1 * h);
+    this.cyl(0.1 * h, 0.27 * h, x, y + 0.5 * h, z, hex, 10, 0.135 * h);
+    this.sphere(0.135 * h, x, y + 0.77 * h, z, hex, 1, 0.35, 0.8);
+    this.cyl(0.04 * h, 0.06 * h, x, y + 0.78 * h, z, hex, 6);
+    this.sphere(0.075 * h, x, y + 0.9 * h, z, hex);
+    this.box(0.065 * h, 0.3 * h, 0.07 * h, x - 0.165 * h, y + 0.47 * h, z, hex);
+    this.box(0.065 * h, 0.065 * h, 0.3 * h, x + 0.165 * h, y + 0.7 * h, z + 0.13 * h, hex);
     if (wings) for (const s of [1, -1]) this.box(0.08 * h, 0.5 * h, 0.3 * h, x + s * 0.17 * h, y + 0.36 * h, z - 0.08 * h, tint(hex, "#ffffff", 0.3), s * 0.5);
   }
 
@@ -1140,82 +1146,140 @@ export const LANDMARKS = {
   /* Il Vittoriano: la scalea, l'altare, il portico curvo di colonne corinzie, i
      due propilei con le quadrighe alate in cima. */
   vittoriano: {
-    surf: 2,
+    surf: 0,
     side: 1,
     offset: 62,
-    look: 22,
+    look: 27,
     build(k) {
-      const m = "#f1ebde";
-      const shade = "#ddd5c4";
-      const bronze = "#57553c";
-      /* La scalea: gradoni pieni che salgono verso il fondo. */
-      for (let i = 0; i < 10; i++) k.plain(108 - i * 2, (i + 1) * 1.1, 4, 0, 0, 30 - i * 4, i % 2 ? m : shade);
-      k.plain(100, 11, 26, 0, 0, -22, m);
-      for (let i = 0; i < 8; i++) k.plain(34, 11 + (i + 1) * 0.8, 1.5, 0, 0, -8 - i * 1.5, i % 2 ? m : shade);
-      /* L'altare e il monumento equestre. */
-      k.plain(52, 7, 3, 0, 11, -19, shade);
-      k.plain(16, 9, 2, 0, 11, -18, "#c9c0ae");
-      k.statue(0, 11, -16.6, "#c9b98a", 6);
-      k.plain(9, 8, 16, 0, 18, -24, m);
-      k.cornice(9, 16, 0, 26, -24, shade);
-      /* Il cavallo di bronzo. */
-      k.plain(1.8, 2.2, 6, 0, 29.4, -24, bronze);
-      k.plain(1.4, 2.6, 1.6, 0, 30.8, -20.6, bronze);
-      k.plain(1, 1, 2.2, 0, 32.8, -19.8, bronze);
-      for (const [x, z] of [[0.6, -21], [-0.6, -21], [0.6, -27], [-0.6, -27]]) k.plain(0.5, 2.8, 0.5, x, 26.7, z, bronze);
-      k.person(0, -23.6, bronze, 31.4, 3.6);
+      const m = "#fbf8f1";
+      const shade = "#e9e3d6";
+      const deep = "#a9a08e";
+      const bronze = "#4d4b36";
+      const gold = "#c9a44a";
 
-      /* Il terrazzo, poi il portico. */
-      k.plain(104, 5, 30, 0, 11, -34, m);
-      k.cornice(104, 30, 0, 16, -34, shade);
-      const B = 16.8;
-      const R = 72;
-      const CZ = 28;
-      const N = 19;
-      const arc = (a, r = R) => [Math.sin(a) * r, CZ - Math.cos(a) * r];
-      for (let i = 0; i < N; i++) {
-        const a = -0.48 + (i / (N - 1)) * 0.96;
-        const [x, z] = arc(a);
-        k.corinth(0.92, 13.6, x, B, z, "#f8f3e8", m);
-        const [bx, bz] = arc(a, R + 7);
-        if (i < N - 1) {
-          const step = (0.96 / (N - 1)) * R;
-          const mid = a + 0.48 / (N - 1);
-          const [px, pz] = arc(mid, R + 7);
-          k.box(step * 1.16, 15, 1, px, B, pz, "#c9c0ae", -mid);
-          const [tx, tz] = arc(mid, R + 3.4);
-          k.box(step * 1.2, 1.4, 8.4, tx, B + 15, tz, m, -mid);
-          k.box(step * 1.22, 1, 9, tx, B + 16.4, tz, shade, -mid);
-        }
-        k.plain(1, 1, 1, bx, B, bz, m);
-      }
-      /* I propilei e le quadrighe. */
+      /* La scalea d'ingresso tra i due avancorpi, con i gruppi dorati ai lati. */
+      for (let i = 0; i < 16; i++) k.plain(44, (i + 1) * 0.5, 1.15, 0, 0, 31.4 - i * 1.1, i % 2 ? m : shade);
       for (const s of [1, -1]) {
-        const X = s * 44;
-        const Z = -26;
-        k.plain(18, 17.4, 14, X, B, Z, m);
-        for (const x of [-7, -2.4, 2.4, 7]) k.corinth(0.92, 13.6, X + x, B, Z + 7.4, "#f8f3e8", m);
-        k.plain(0.1, 11, 0.1, X, B + 1, Z + 7.05, "#b5ad9c");
-        k.plain(19, 1.4, 15, X, B + 15, Z, m);
-        k.cornice(19, 15, X, B + 16.4, Z, shade);
-        k.plain(11, 3, 9, X, B + 17.2, Z, m);
-        /* Quattro cavalli, il carro, la Vittoria alata. */
-        const Q = B + 20.2;
-        for (let i = 0; i < 4; i++) {
-          const x = X - 2.7 + i * 1.8;
-          k.plain(0.9, 1.1, 3.2, x, Q + 1.3, Z + 1, bronze);
-          k.plain(0.6, 1.5, 0.8, x, Q + 2.2, Z + 2.5, bronze);
-          k.plain(0.5, 0.5, 1.2, x, Q + 3.5, Z + 2.9, bronze);
-          for (const dz of [0.2, 2]) k.plain(0.24, 1.3, 0.24, x, Q, Z + dz, bronze);
-        }
-        k.plain(3.4, 1.8, 1.6, X, Q + 0.4, Z - 1.4, bronze);
-        k.statue(X, Q + 1.6, Z - 1.3, bronze, 4.6);
-        for (const e of [1, -1]) k.plain(0.2, 2.6, 1.6, X + e * 1.5, Q + 4, Z - 1.6, "#b9a05c");
-        k.masses.push({ x: X, z: Z, w: 18, d: 14 });
+        k.plain(34, 8, 18, s * 39, 0, 23, m);
+        k.plain(34.6, 1, 18.6, s * 39, 0, 23, shade);
+        k.balustrade(34, s * 39, 8, 31.6, m);
+        k.plain(5, 7, 5, s * 24.5, 0, 34.5, m);
+        k.cornice(5, 5, s * 24.5, 7, 34.5, shade);
+        k.statue(s * 24.5, 7.7, 34.5, gold, 5);
+        /* Le fontane dei due mari. */
+        k.plain(12, 1.2, 4, s * 41, 0, 34, shade);
+        k.plain(11, 0.2, 3, s * 41, 1.2, 34, "#7fb0b8");
+        k.statue(s * 41, 1.4, 33, m, 3.4);
+        /* Le Vittorie alate sulle colonne. */
+        k.corinth(0.8, 9, s * 51, 8, 27, m, shade);
+        k.statue(s * 51, 18.6, 27, gold, 3.4, true);
       }
-      k.masses.push({ x: 0, z: -24, w: 100, d: 40 });
+
+      /* Il primo terrazzo e l'Altare della Patria: la Dea Roma nella nicchia
+         d'oro, i fregi ai lati, il Milite Ignoto e i bracieri. */
+      k.plain(112, 8, 44, 0, 0, -8, m);
+      k.plain(60, 9, 3, 0, 8, 1, m);
+      k.cornice(60, 3, 0, 17, 1, shade);
+      k.plain(7, 7, 0.4, 0, 9.6, 2.7, gold);
+      k.plain(4, 1.6, 2, 0, 8, 3.4, shade);
+      k.statue(0, 9.6, 3.4, "#f3ecd8", 6);
+      for (const s of [1, -1]) {
+        k.plain(24, 4.4, 0.3, s * 17, 10.4, 2.6, "#e2dac8");
+        for (let i = 0; i < 9; i++) k.plain(0.5, 4.4, 0.5, s * (5.6 + i * 2.9), 10.4, 2.7, m);
+        k.cyl(0.5, 1.6, s * 6, 8, 5.6, bronze, 8);
+        k.light(0.6, 0.5, 0.6, s * 6, 9.6, 5.6, "#ffb347");
+      }
+      k.plain(8, 0.8, 2.4, 0, 8, 5.4, shade);
+
+      /* Le due rampe che salgono al secondo terrazzo. */
+      for (const s of [1, -1]) {
+        for (let i = 0; i < 18; i++) k.plain(16, (i + 1) * 0.5, 0.8, s * 40, 8, 11.6 - i * 0.8, i % 2 ? m : shade);
+        k.plain(8, 11, 16, s * 52, 8, 5, m);
+        k.cornice(8, 16, s * 52, 19, 5, shade);
+        k.plain(1.2, 10, 15, s * 31.4, 8, 5, m);
+      }
+      k.plain(112, 9, 30, 0, 8, -15, m);
+
+      /* Il monumento equestre sul suo piedistallo. */
+      k.plain(16, 2, 12, 0, 17, -8, shade);
+      k.plain(12, 9, 8, 0, 19, -8, m);
+      k.plain(12.4, 2.6, 8.4, 0, 20.4, -8, "#cfc6ae");
+      k.cornice(12, 8, 0, 28, -8, shade, 0.5);
+      k.sphere(1, 0, 34.4, -8, bronze, 1.5, 1.7, 4.4);
+      for (const [x, z] of [[0.9, -4.8], [-0.9, -4.8], [0.9, -11.2], [-0.9, -11.2]]) k.plain(0.7, 4.6, 0.7, x, 28.7, z, bronze);
+      k.plain(1.7, 3.8, 2, 0, 34.8, -4.4, bronze);
+      k.plain(1.2, 1.4, 3.2, 0, 37.6, -3, bronze);
+      k.plain(0.7, 3, 0.7, 0, 31.6, -12.6, bronze);
+      k.statue(0, 35.6, -8.6, bronze, 5.2);
+
+      /* Il basamento alto del portico. */
+      k.plain(112, 13, 34, 0, 17, -33, m);
+      k.plain(112.6, 1.2, 34.6, 0, 17, -33, shade);
+      k.cornice(112, 34, 0, 30, -33, shade, 0.6);
+      for (let x = -52; x <= 52; x += 8) if (Math.abs(x) > 8) k.plain(1.6, 11, 0.6, x, 18.4, -15.7, shade);
+      for (const s of [1, -1]) k.plain(5, 8.4, 0.4, s * 20, 18.2, -15.8, "#6a5a40");
+
+      /* Il portico curvo: sedici colonne corinzie, la trabeazione, l'attico
+         con le statue delle regioni. Dietro, il muro in ombra. */
+      const B = 30.9;
+      const R = 95;
+      const CZ = 63.9;
+      const N = 16;
+      const A = 0.335;
+      const arc = (a, r = R) => [Math.sin(a) * r, CZ - Math.cos(a) * r];
+      const step = ((A * 2) / (N - 1)) * R;
+      for (let i = 0; i < N; i++) {
+        const a = -A + (i / (N - 1)) * A * 2;
+        const [x, z] = arc(a);
+        k.corinth(1.05, 14, x, B, z, "#fdfbf6", m);
+        const [sx, sz] = arc(a, R + 0.6);
+        k.statue(sx, B + 21.6, sz, m, 3.2);
+      }
+      for (let i = -1; i < N; i++) {
+        const mid = -A + ((i + 0.5) / (N - 1)) * A * 2;
+        const [px, pz] = arc(mid, R + 6.4);
+        k.box(step * 1.16, 16.4, 1, px, B, pz, deep, -mid);
+        const [tx, tz] = arc(mid, R + 3);
+        k.box(step * 1.2, 2.4, 9, tx, B + 16, tz, m, -mid);
+        k.box(step * 1.24, 0.8, 10, tx, B + 18.4, tz, shade, -mid);
+        k.box(step * 1.2, 2.4, 7, tx, B + 19.2, tz, m, -mid);
+      }
+
+      /* I propilei: fronte di tempio, attico, e sopra la quadriga di bronzo
+         con la Vittoria alata. */
+      for (const s of [1, -1]) {
+        const X = s * 46;
+        const Z = -27;
+        k.plain(20, 17, 16, X, B, Z, m);
+        for (const x of [-7.5, -2.5, 2.5, 7.5]) k.corinth(1.05, 14, X + x, B, Z + 8.8, "#fdfbf6", m);
+        k.plain(5, 11, 0.3, X, B + 0.5, Z + 8.1, "#6f6858");
+        k.plain(21, 2.4, 19.6, X, B + 16, Z + 1.2, m);
+        k.plain(21.6, 0.8, 20.2, X, B + 18.4, Z + 1.2, shade);
+        k.gable(21.6, 4, 20.2, X, B + 19.2, Z + 1.2, m);
+        k.plain(12, 7, 10, X, B + 19.2, Z - 1, m);
+        k.cornice(12, 10, X, B + 26.2, Z - 1, shade, 0.5);
+        const Q = B + 27;
+        for (let i = 0; i < 4; i++) {
+          const x = X - 3.9 + i * 2.6;
+          k.sphere(1, x, Q + 3, Z + 0.6, bronze, 0.7, 0.85, 2.3);
+          k.plain(0.8, 2.2, 1, x, Q + 3.4, Z + 2.6, bronze);
+          k.plain(0.6, 0.7, 1.7, x, Q + 5.3, Z + 3.3, bronze);
+          for (const dz of [-0.9, 2]) k.plain(0.34, 2.4, 0.34, x, Q, Z + dz, bronze);
+        }
+        k.plain(4.8, 2.4, 2.2, X, Q + 0.4, Z - 2.6, bronze);
+        k.statue(X, Q + 2.4, Z - 2.5, bronze, 6.4, true);
+        k.masses.push({ x: X, z: Z, w: 20, d: 16 });
+      }
+
+      /* I pennoni col tricolore. */
+      for (const s of [1, -1]) {
+        k.cyl(0.22, 30, s * 31, 0, 38, "#d8d8d8", 8, 0.12);
+        [["#1f8a4c", 0], ["#f4f4f0", 1], ["#c8303a", 2]].forEach(([hex, n]) => k.plain(1.7, 3.2, 0.1, s * 31 + 1 + n * 1.7, 25.6, 38, hex));
+      }
+
+      k.masses.push({ x: 0, z: -9, w: 112, d: 82 });
       k.plain(124, 0.05, 30, 0, 0, 40, "#b8b1a2");
-      for (const x of [-60, 60]) k.stonePine(x, 26, 13, 0, "#2f5a3a");
+      for (const x of [-64, 64]) k.stonePine(x, 26, 13, 0, "#2f5a3a");
     },
   },
 
@@ -2231,6 +2295,20 @@ export function buildLandmark(name, solid, glow) {
 /* ---------- Facciate e arredo della strada ---------- */
 /* Una facciata dipinta: intonaco o mattoni invecchiati, cornici di pietra,
    persiane, balconi, botteghe al piano terra, colature sotto i davanzali. */
+/* Le facciate delle case: colori e griglia delle finestre. */
+const FACADES = {
+  salmon: { wall: "#c98f6d", base: "#b3a083", pane: "#2b333a", shutter: "#2f6a4e", frame: "#efe3cc", cols: 4, rows: 6 },
+  coral: { wall: "#e2704f", base: "#b9ad9b", pane: "#262c31", shutter: null, frame: "#f3ece0", cols: 3, rows: 5 },
+  ochre: { wall: "#d9a24f", base: "#a8906e", pane: "#2b2520", shutter: "#5b4631", frame: "#e9d6ae", cols: 3, rows: 6 },
+  rust: { wall: "#c4642f", base: "#8e735a", pane: "#2b2520", shutter: "#4d3a2a", frame: "#e9d6ae", cols: 3, rows: 6 },
+  red: { wall: "#a8392e", base: "#7d6a58", pane: "#231f1c", shutter: "#3d4a3c", frame: "#e6d8bc", cols: 3, rows: 6 },
+  brick: { wall: "#9a5a44", base: "#8a8072", pane: "#242624", shutter: null, frame: "#e0d6c0", cols: 4, rows: 6, brick: true },
+  yellowBrick: { wall: "#c9a24e", base: "#8a7a5e", pane: "#262422", shutter: "#3a4a3a", frame: "#e8dcc0", cols: 3, rows: 5, brick: true },
+  lisbon: { wall: "#f0ead9", base: "#b9b2a0", pane: "#2f373e", shutter: "#3b6f5e", frame: "#ffffff", cols: 3, rows: 5, iron: true },
+  lisbonY: { wall: "#efc96f", base: "#a89a7c", pane: "#2f373e", shutter: "#4f6a5e", frame: "#fbf5e6", cols: 3, rows: 5, iron: true },
+  lisbonB: { wall: "#9fb7c4", base: "#9a9484", pane: "#2f373e", shutter: "#f0ece0", frame: "#ffffff", cols: 3, rows: 5, iron: true },
+};
+
 export function facadeTexture(style, sharp = true) {
   const k = sharp ? 2 : 1;
   const c = document.createElement("canvas");
@@ -2238,18 +2316,7 @@ export function facadeTexture(style, sharp = true) {
   c.height = 512 * k;
   const g = c.getContext("2d");
   g.scale(k, k);
-  const s = {
-    salmon: { wall: "#c98f6d", base: "#b3a083", pane: "#2b333a", shutter: "#2f6a4e", frame: "#efe3cc", cols: 4, rows: 6 },
-    coral: { wall: "#e2704f", base: "#b9ad9b", pane: "#262c31", shutter: null, frame: "#f3ece0", cols: 3, rows: 5 },
-    ochre: { wall: "#d9a24f", base: "#a8906e", pane: "#2b2520", shutter: "#5b4631", frame: "#e9d6ae", cols: 3, rows: 6 },
-    rust: { wall: "#c4642f", base: "#8e735a", pane: "#2b2520", shutter: "#4d3a2a", frame: "#e9d6ae", cols: 3, rows: 6 },
-    red: { wall: "#a8392e", base: "#7d6a58", pane: "#231f1c", shutter: "#3d4a3c", frame: "#e6d8bc", cols: 3, rows: 6 },
-    brick: { wall: "#9a5a44", base: "#8a8072", pane: "#242624", shutter: null, frame: "#e0d6c0", cols: 4, rows: 6, brick: true },
-    yellowBrick: { wall: "#c9a24e", base: "#8a7a5e", pane: "#262422", shutter: "#3a4a3a", frame: "#e8dcc0", cols: 3, rows: 5, brick: true },
-    lisbon: { wall: "#f0ead9", base: "#b9b2a0", pane: "#2f373e", shutter: "#3b6f5e", frame: "#ffffff", cols: 3, rows: 5, iron: true },
-    lisbonY: { wall: "#efc96f", base: "#a89a7c", pane: "#2f373e", shutter: "#4f6a5e", frame: "#fbf5e6", cols: 3, rows: 5, iron: true },
-    lisbonB: { wall: "#9fb7c4", base: "#9a9484", pane: "#2f373e", shutter: "#f0ece0", frame: "#ffffff", cols: 3, rows: 5, iron: true },
-  }[style];
+  const s = FACADES[style];
   const W = 256;
   const H = 512;
   const FOOT = 74;
@@ -2407,6 +2474,79 @@ export function facadeTexture(style, sharp = true) {
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
+}
+
+/* Il rilievo di una facciata: cornici, davanzali, persiane, balconi e
+   cornicione veri, appoggiati sopra quelli dipinti e vestiti con gli stessi
+   pezzi di texture. Sta nel cubo unitario della casa (larga wide, profonda
+   deep) e copre le due facce lunghe, quelle che guardano la strada. */
+export function facadeRelief(style, wide, deep) {
+  const s = FACADES[style];
+  const W = 256;
+  const H = 512;
+  const FOOT = 74;
+  const parts = [];
+  /* Un blocchetto sul muro. x e y sono in pixel della texture, depth e off
+     (lo stacco dal muro) in metri. Davanti porta il suo pezzo di texture, ai
+     lati il colore del punto at. */
+  const block = (face, x0, y0, x1, y1, depth, off = 0, at = null) => {
+    const w = (x1 - x0) / W;
+    const h = (y1 - y0) / H;
+    const d = depth / deep;
+    const g = new THREE.BoxGeometry(w, h, d);
+    const cx = (x0 + x1) / 2 / W - 0.5;
+    g.translate(face * cx, 0.5 - (y0 + y1) / 2 / H, face * (0.5 + off / deep + d / 2));
+    const uv = g.attributes.uv;
+    const front = face > 0 ? 4 : 5;
+    const su = at ? at[0] / W : (x0 + x1) / 2 / W;
+    const sv = 1 - (at ? at[1] : (y0 + y1) / 2) / H;
+    for (let i = 0; i < uv.count; i++) {
+      if (Math.floor(i / 4) === front) uv.setXY(i, (x0 + (x1 - x0) * uv.getX(i)) / W, 1 - (y1 - (y1 - y0) * uv.getY(i)) / H);
+      else uv.setXY(i, su, sv);
+    }
+    parts.push(g);
+  };
+
+  const cw = W / s.cols;
+  const rh = (H - FOOT - 26) / s.rows;
+  const y0 = H - FOOT;
+  for (const face of [1, -1]) {
+    for (let r = 0; r < s.rows; r++) {
+      for (let col = 0; col < s.cols; col++) {
+        const w = cw * 0.38;
+        const h = rh * 0.66;
+        const x = col * cw + (cw - w) / 2;
+        const y = 26 + r * rh + (rh - h) * 0.42;
+        /* Cornice: due stipiti e l'architrave, poi il davanzale. */
+        block(face, x - 5, y - 5, x, y + h + 5, 0.24);
+        block(face, x + w, y - 5, x + w + 5, y + h + 5, 0.24);
+        block(face, x - 8, y - 8, x + w + 8, y - 1, 0.4, 0, [x - 3, y + h / 2]);
+        block(face, x - 9, y + h + 5, x + w + 9, y + h + 9, 0.5);
+        if (s.shutter) {
+          const sw = w * 0.5;
+          block(face, x - sw - 5, y, x - 5, y + h, 0.09, 0.14);
+          block(face, x + w + 5, y, x + w + sw + 5, y + h, 0.09, 0.14);
+        }
+        if (s.iron || (r === 1 && col !== 1)) {
+          const stone = [x - 3, y + h / 2];
+          const iron = [x - 9.5, y + h - 11];
+          block(face, x - 12, y + h + 1, x + w + 12, y + h + 4.5, 1, 0, stone);
+          block(face, x - 12, y + h - 13.5, x + w + 12, y + h - 12, 0.08, 0.9, iron);
+          const n = 7;
+          for (let i = 0; i <= n; i++) {
+            const bx = x - 11.5 + ((w + 22) * i) / n;
+            block(face, bx, y + h - 12, bx + 1, y + h + 1, 0.05, 0.92, iron);
+          }
+        }
+      }
+    }
+    /* Cornicione a due gradini, marcapiano e zoccolo che sporge. */
+    block(face, 0, 0, W, 11, 0.85);
+    block(face, 0, 11, W, 18, 0.4);
+    block(face, 0, y0 - 3, W, y0 + 2, 0.32);
+    block(face, 0, y0 + 2, W, H, 0.14);
+  }
+  return mergeGeometries(parts);
 }
 
 /* Passa la grana di una scansione su una facciata già dipinta. */

@@ -9,10 +9,15 @@
 // grade:    la pellicola delle foto: 0 colore pieno, 1 stampa antica.
 // neon:     quanto le foto risentono delle luci della notte.
 
-// Una canzone per tutto il viaggio. start ed end sono in secondi; end: null =
-// fino alla fine. Chi non è collegato a Spotify sente l'anteprima di 30 secondi
-// scelta da Spotify, e start/end per lui non valgono.
-export const SONG = { uri: "spotify:track:7wFEzF8FbofVlQS1OcbghM", start: 0, end: null };
+// Le canzoni. Ogni capitolo ha la sua (campo song); SONG vale per i capitoli
+// senza canzone, FINALE_SONG suona dal GRAZIE in poi. start ed end sono in
+// secondi; end: null = fino alla fine. Chi non è collegato a Spotify sente
+// l'anteprima di 30 secondi scelta da Spotify, e start/end per lui non valgono.
+export const SONG = { uri: "spotify:track:7wFEzF8FbofVlQS1OcbghM", start: 18, end: null };
+const SONG_MELFI = { uri: "spotify:track:70C4NyhjD5OZUMzvWZ3njJ", start: 53, end: null };
+const SONG_ROMA = { uri: "spotify:track:7vc09IDmFH0MfyPYHPEWRM", start: 33, end: null };
+const SONG_LISBONA = { uri: "spotify:track:2JnVkJsUnBs7kyvVzD8E6L", start: 24, end: null };
+export const FINALE_SONG = { uri: "spotify:track:7ppPZa3TRUSGKaks9wH7VT", start: 242, end: null };
 
 // Il muro condiviso: l'indirizzo del Worker (cartella worker/). Vuoto = ogni
 // foto resta solo sul telefono di chi l'ha scattata.
@@ -28,6 +33,7 @@ export const THANKS = {
 export const CHAPTERS = [
   {
     id: "casa",
+    song: SONG,
     from: 1,
     to: 4,
     scenery: "romeStreet",
@@ -38,6 +44,7 @@ export const CHAPTERS = [
   },
   {
     id: "melfi",
+    song: SONG_MELFI,
     from: 5,
     to: 9,
     scenery: "melfi",
@@ -48,6 +55,7 @@ export const CHAPTERS = [
   },
   {
     id: "roma",
+    song: SONG_ROMA,
     from: 10,
     to: 23,
     scenery: "romeCity",
@@ -68,6 +76,7 @@ export const CHAPTERS = [
   },
   {
     id: "lisbona",
+    song: SONG_LISBONA,
     from: 24,
     to: 99,
     scenery: "lisbon",

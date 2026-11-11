@@ -9,7 +9,7 @@ import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometr
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { createBus } from "./bus.js";
 import { FINALE_SKY, PALETTES, PARTICLES, THANKS } from "./chapters.js";
-import { buildLandmark, facadeTexture, groundTexture, LANDMARKS, weatherFacade } from "./landmarks.js";
+import { buildLandmark, facadeRelief, facadeTexture, groundTexture, LANDMARKS, weatherFacade } from "./landmarks.js";
 import { CITIES, onBeachFront, onLand, outlines, ROUTE } from "./map.js";
 
 /* Un passo fermo dura così, in secondi. I tocchi in coda lo accorciano. */
@@ -35,6 +35,9 @@ const TILE = 7;
 /* La carreggiata, poi il marciapiede. */
 const ROAD_HALF = 4.3;
 const WALK_HALF = 7.6;
+/* Una casa tipo, in metri: serve a dare lo spessore giusto al rilievo. */
+const HOUSE_WIDE = 20;
+const HOUSE_DEEP = 16;
 /* Quanto spazio libero chiede ogni luogo attorno a sé. */
 const CLEARING = { tiber: 118, colosseum: 92, comercio: 135, nova: 104, pantheon: 72, luissVilla: 80, luissGlass: 62, aula: 62, vittoriano: 74, spagna: 72, tower: 50, belem: 40, tram: 92, carcavelos: 78, sunsetBeach: 70 };
 /* Guida libera. */
@@ -1092,36 +1095,186 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     const top = surface({ color: "#a2603e" });
     return [side, side, top, top, side, side];
   };
-  const pineShape = mergeGeometries(
-    [[0, 0, 0, 4.2], [2.8, -0.5, 1, 3], [-2.6, -0.3, -1, 3.2], [0.6, -0.6, 2.8, 2.8], [-0.8, -0.2, -2.7, 2.9]].map(([x, y, z, r]) => {
-      const g = new THREE.IcosahedronGeometry(r, 1);
-      g.scale(1, 0.48, 1);
-      g.translate(x, y, z);
-      return g;
-    })
-  );
-  const carShape = mergeGeometries(
-    [new THREE.BoxGeometry(3.9, 0.7, 1.7), new THREE.BoxGeometry(2, 0.55, 1.5).translate(-0.2, 0.6, 0)].map((g) => g.toNonIndexed())
-  );
-  const lit = () => surface({ color: "#ffffff" });
-  /* La chioma: palle di foglie fuse e deformate, non una pallina. */
-  const crown = (() => {
-    const spots = [[0, 0.1, 0, 0.82], [0.56, -0.12, 0.2, 0.62], [-0.5, -0.05, 0.3, 0.6], [0.12, -0.16, -0.58, 0.62], [-0.2, 0.42, -0.1, 0.56], [0.3, 0.36, 0.28, 0.5]];
-    const g = mergeVertices(mergeGeometries(spots.map(([x, y, z, r]) => {
-      const b = new THREE.IcosahedronGeometry(r, 1);
-      b.deleteAttribute("uv");
-      b.deleteAttribute("normal");
-      b.translate(x, y, z);
-      return b;
-    })));
-    const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const n = 1 + Math.sin(p.getX(i) * 9.1 + p.getZ(i) * 5.3) * Math.cos(p.getY(i) * 7.7) * 0.11;
-      p.setXYZ(i, p.getX(i) * n, p.getY(i) * n, p.getZ(i) * n);
-    }
-    g.computeVertexNormals();
-    return g;
+  /* L'utilitaria parcheggiata: sagoma estrusa, vetri scuri e ruote. Il colore
+     dell'istanza tinge la carrozzeria, i vertici scuriscono il resto. */
+  const carShape = (() => {
+    const tint = (g, v) => {
+      const n = g.toNonIndexed();
+      n.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(n.attributes.position.count * 3).fill(v), 3));
+      return n;
+    };
+    const side = (points, width, bevel) => {
+      const shape = new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y)));
+      const g = new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: bevel > 0, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 2, curveSegments: 1 });
+      return g.translate(0, 0, -width / 2);
+    };
+    const body = side([[-1.95, 0.3], [-1.95, 0.75], [-1.75, 0.86], [-1.05, 0.93], [-0.6, 1.42], [0.75, 1.42], [1.35, 0.95], [1.88, 0.86], [1.95, 0.62], [1.95, 0.3]], 1.5, 0.08);
+    const glass = side([[-1.02, 0.96], [-0.64, 1.36], [0.78, 1.36], [1.3, 0.98]], 1.69, 0);
+    const wheel = (x, z) => new THREE.CylinderGeometry(0.33, 0.33, 0.24, 12).rotateX(Math.PI / 2).translate(x, 0.33, z);
+    const hub = (x, z) => new THREE.CylinderGeometry(0.17, 0.17, 0.26, 10).rotateX(Math.PI / 2).translate(x, 0.33, z);
+    const lamp = (x, z, w) => new THREE.BoxGeometry(0.06, 0.14, w).translate(x, 0.74, z);
+    const parts = [
+      tint(body, 1),
+      tint(glass, 0.07),
+      ...[[-1.25, 0.74], [-1.25, -0.74], [1.22, 0.74], [1.22, -0.74]].flatMap(([x, z]) => [tint(wheel(x, z), 0.05), tint(hub(x, z), 0.55)]),
+      tint(lamp(-1.97, 0.55, 0.3), 1.6),
+      tint(lamp(-1.97, -0.55, 0.3), 1.6),
+      tint(lamp(1.97, 0.58, 0.26), 0.35),
+      tint(lamp(1.97, -0.58, 0.26), 0.35),
+    ];
+    return mergeGeometries(parts).translate(0, -0.62, 0);
   })();
+  const lit = () => surface({ color: "#ffffff" });
+  /* Le chiome: ciuffi di foglie ritagliate attorno a un cuore scuro. Le
+     normali guardano fuori dalla chioma, così la luce la modella come un
+     volume solo, e il vento la muove appena. */
+  const wind = { value: 0 };
+  const leafMap = (() => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 256;
+    const g = c.getContext("2d");
+    const r = mulberry(77);
+    for (let i = 0; i < 64; i++) {
+      const a = r() * Math.PI * 2;
+      const d = Math.sqrt(r()) * 82;
+      const v = 205 + Math.floor(r() * 50);
+      g.save();
+      g.translate(112 + Math.cos(a) * d, 112 + Math.sin(a) * d);
+      g.rotate(r() * Math.PI);
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.beginPath();
+      g.ellipse(0, 0, 9 + r() * 9, 4 + r() * 5, 0, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+    /* Un angolo pieno, per il cuore della chioma. */
+    g.fillStyle = "#fff";
+    g.fillRect(224, 224, 32, 32);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = aniso;
+    return t;
+  })();
+
+  /* blobs: [x, y, z, rx, ry, rz]. Ogni palla ha un cuore pieno e perBlob ciuffi. */
+  function foliage(blobs, perBlob, size, seed) {
+    const r = mulberry(seed);
+    const pos = [];
+    const nor = [];
+    const uv = [];
+    const col = [];
+    const idx = [];
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const [, y, , , ry] of blobs) {
+      lo = Math.min(lo, y - ry);
+      hi = Math.max(hi, y + ry);
+    }
+    /* Sotto è in ombra, in cima prende il sole. */
+    const shade = (y, k) => {
+      const v = (0.62 + 0.5 * ((y - lo) / (hi - lo))) * k;
+      col.push(v, v, v);
+    };
+    const at = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    const t = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const out = new THREE.Vector3();
+    const ball = new THREE.IcosahedronGeometry(1, 1).attributes.position;
+    for (const [x, y, z, rx, ry, rz] of blobs) {
+      const first = pos.length / 3;
+      for (let i = 0; i < ball.count; i++) {
+        n.fromBufferAttribute(ball, i);
+        pos.push(x + n.x * rx * 0.66, y + n.y * ry * 0.66, z + n.z * rz * 0.66);
+        nor.push(n.x, n.y, n.z);
+        uv.push(0.94, 0.06);
+        shade(y + n.y * ry * 0.66, 0.62);
+        idx.push(first + i);
+      }
+      for (let i = 0; i < perBlob; i++) {
+        const a = r() * Math.PI * 2;
+        const h = clamp(r() * 1.75 - 0.75, -1, 1);
+        const w = Math.sqrt(1 - h * h);
+        n.set(Math.cos(a) * w, h, Math.sin(a) * w);
+        at.set(x + n.x * rx * 0.86, y + n.y * ry * 0.86, z + n.z * rz * 0.86);
+        t.set(r() - 0.5, r() - 0.5, r() - 0.5).cross(n).normalize();
+        b.crossVectors(n, t).addScaledVector(n, (r() - 0.5) * 1.2).normalize();
+        out.copy(n).setY(n.y + 0.35).normalize();
+        const k = size * (0.75 + r() * 0.5);
+        const tone = 0.85 + r() * 0.3;
+        const base = pos.length / 3;
+        for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+          const py = at.y + (t.y * u + b.y * v) * k;
+          pos.push(at.x + (t.x * u + b.x * v) * k, py, at.z + (t.z * u + b.z * v) * k);
+          nor.push(out.x, out.y, out.z);
+          uv.push(u > 0 ? 0.86 : 0.02, v > 0 ? 0.98 : 0.15);
+          shade(py, tone);
+        }
+        idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    return g;
+  }
+
+  const leafy = () => {
+    const m = surface({ map: leafMap, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.95 });
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.uWind = wind;
+      shader.vertexShader = "uniform float uWind;\n" + shader.vertexShader.replace("#include <begin_vertex>", /* glsl */ `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+        float leafPhase = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.29;
+        #else
+        float leafPhase = 0.0;
+        #endif
+        float sway = sin(uWind * 1.3 + leafPhase + position.y * 2.0) * 0.035 + sin(uWind * 2.9 + leafPhase * 1.7 + position.x * 5.0) * 0.012;
+        transformed.x += sway;
+        transformed.z += sway * 0.6;`);
+      /* Il retro di un ciuffo non deve girare la normale: resta quella della chioma. */
+      shader.fragmentShader = "#undef DOUBLE_SIDED\n" + shader.fragmentShader;
+    };
+    return m;
+  };
+  const leafShadow = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: leafMap, alphaTest: 0.45, side: THREE.DoubleSide });
+  const LEAFY = ["tree", "pine", "hedge"];
+
+  /* Un ramo: un tronchetto da un punto all'altro. */
+  const limb = (from, to, r0, r1) => {
+    const a = new THREE.Vector3(...from);
+    const d = new THREE.Vector3(...to).sub(a);
+    const len = d.length();
+    const g = new THREE.CylinderGeometry(r1, r0, len, 5).translate(0, len / 2, 0);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
+    return g.translate(a.x, a.y, a.z);
+  };
+  const trunkShape = mergeGeometries([
+    new THREE.CylinderGeometry(0.8, 1.25, 2, 7),
+    limb([0, 0.45, 0], [2.7, 1.5, 0.9], 0.45, 0.2),
+    limb([0, 0.25, 0], [-2.5, 1.45, 1.1], 0.45, 0.2),
+    limb([0, 0.6, 0], [0.4, 1.55, -2.7], 0.42, 0.2),
+  ]);
+  const pineTrunkShape = mergeGeometries([
+    new THREE.CylinderGeometry(0.7, 1.05, 2, 7),
+    limb([0, 0.5, 0], [7.5, 0.95, 2], 0.5, 0.25),
+    limb([0, 0.42, 0], [-7, 0.94, -3], 0.5, 0.25),
+    limb([0, 0.6, 0], [1.5, 0.96, 7], 0.45, 0.25),
+    limb([0, 0.55, 0], [-2, 0.95, -7], 0.45, 0.25),
+  ]);
+  const leaves = isPhone ? 0.5 : 1;
+  const crown = foliage(
+    [[0, 0.1, 0, 0.82], [0.56, -0.12, 0.2, 0.62], [-0.5, -0.05, 0.3, 0.6], [0.12, -0.16, -0.58, 0.62], [-0.2, 0.42, -0.1, 0.56], [0.3, 0.36, 0.28, 0.5]].map(([x, y, z, r]) => [x, y, z, r, r, r]),
+    Math.round(30 * leaves), 0.4, 11
+  );
+  const pineShape = foliage(
+    [[0, 0, 0, 4.2], [2.8, -0.5, 1, 3], [-2.6, -0.3, -1, 3.2], [0.6, -0.6, 2.8, 2.8], [-0.8, -0.2, -2.7, 2.9]].map(([x, y, z, r]) => [x, y, z, r, r * 0.42, r]),
+    Math.round(44 * leaves), 1.25, 12
+  );
+  const hedgeShape = foliage([[0, 0, 0, 1, 1, 1]], Math.round(70 * leaves), 0.42, 13);
   /* Il lampione di ghisa a tre lanterne, e il vaso di pietra. */
   const turned = (points, seg = 10) => new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), seg);
   const lampShape = mergeGeometries(
@@ -1136,11 +1289,11 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const vaseShape = turned([[0.3, 0], [0.34, 0.08], [0.12, 0.2], [0.12, 0.42], [0.42, 0.7], [0.58, 1.1], [0.62, 1.2], [0.5, 1.2]], 8);
   const shapes = {
     hill: [new THREE.IcosahedronGeometry(1, 2), toon("#ffffff")],
-    tree: [isPhone ? new THREE.IcosahedronGeometry(1, 1) : crown, lit()],
-    trunk: [new THREE.CylinderGeometry(1, 1.2, 2, 6), toon("#ffffff")],
-    pine: [pineShape, lit()],
-    pineTrunk: [new THREE.CylinderGeometry(0.75, 1, 2, 6), lit()],
-    hedge: [new THREE.IcosahedronGeometry(1, 1), lit()],
+    tree: [crown, leafy()],
+    trunk: [trunkShape, lit()],
+    pine: [pineShape, leafy()],
+    pineTrunk: [pineTrunkShape, lit()],
+    hedge: [hedgeShape, leafy()],
     post: [lampShape, lit()],
     vase: [vaseShape, lit()],
     bloom: [new THREE.IcosahedronGeometry(1, 1), toon("#ffffff")],
@@ -1149,7 +1302,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       g.rotateY(Math.PI / 4);
       return g.toNonIndexed();
     })(), lit()],
-    car: [carShape, lit()],
+    car: [carShape, surface({ color: "#ffffff", vertexColors: true, roughness: 0.45 })],
     deck: [new THREE.BoxGeometry(1, 1, 1), lit()],
   };
   for (const style of BUILDINGS) shapes[style] = [new THREE.BoxGeometry(1, 1, 1), facadeMaterial(style)];
@@ -1162,7 +1315,16 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       mesh.setColorAt(i, item.color);
     });
     mesh.frustumCulled = false;
-    if (!isPhone && (BUILDINGS.includes(kind) || kind === "tree" || kind === "pine" || kind === "post" || kind === "car")) mesh.castShadow = true;
+    if (!isPhone && (BUILDINGS.includes(kind) || kind === "tree" || kind === "pine" || kind === "trunk" || kind === "pineTrunk" || kind === "post" || kind === "car")) mesh.castShadow = true;
+    if (LEAFY.includes(kind)) mesh.customDepthMaterial = leafShadow;
+    /* Le case hanno il rilievo vero sopra la facciata dipinta. */
+    if (!isPhone && BUILDINGS.includes(kind)) {
+      const relief = new THREE.InstancedMesh(facadeRelief(kind, HOUSE_WIDE, HOUSE_DEEP), shapes[kind][1][0], list.length);
+      list.forEach((item, i) => relief.setMatrixAt(i, item.matrix));
+      relief.frustumCulled = false;
+      relief.receiveShadow = true;
+      world.add(relief);
+    }
     if (!isPhone && (BUILDINGS.includes(kind) || kind === "roof")) mesh.receiveShadow = true;
     world.add(mesh);
   }
@@ -2243,6 +2405,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     if (!shadowTick) renderer.shadowMap.needsUpdate = true;
     airUniforms.uCamera.value.copy(camera.position);
     airUniforms.uTime.value = t;
+    wind.value = t;
     skyUniforms.uTime.value = t;
     if (sea) {
       sea.material.uniforms.uTime.value = t;

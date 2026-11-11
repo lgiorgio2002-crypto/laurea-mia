@@ -178,10 +178,20 @@ button {
   left: 0;
   bottom: 0;
   width: 300px;
-  height: 152px;
+  height: 80px;
   opacity: 0;
   pointer-events: none;
   z-index: -1;
+}
+
+.needs-player .player {
+  left: 50%;
+  bottom: calc(44px + env(safe-area-inset-bottom));
+  max-width: calc(100vw - 24px);
+  transform: translateX(-50%);
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 70;
 }
 
 .sound {
