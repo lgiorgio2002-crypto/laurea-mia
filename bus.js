@@ -4,6 +4,7 @@
 // spezzano le riflessioni della vernice.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const LENGTH = 4.42;
 const WIDTH = 1.76;
@@ -252,6 +253,24 @@ export function createBus(renderer, environment) {
       wheels.push({ spin, sign: s });
     }
   }
+
+  /* Il pulmino a mattoncini: quando arriva prende il posto della carrozzeria
+     liscia; restano il bollino play, l'ombra e le ruote che girano. */
+  const bricks = new GLTFLoader();
+  bricks.loadAsync("models/busBody.glb").then((g) => {
+    for (const child of body.children) if (child !== badge) child.visible = false;
+    g.scene.traverse((o) => {
+      if (o.isMesh) o.castShadow = true;
+    });
+    body.add(g.scene);
+    badge.position.z = 0.95;
+  });
+  bricks.loadAsync("models/busWheel.glb").then((g) => {
+    for (const w of wheels) {
+      for (const child of w.spin.children) child.visible = false;
+      w.spin.add(g.scene.clone());
+    }
+  });
 
   /* Ombra morbida a terra. */
   const c = document.createElement("canvas");

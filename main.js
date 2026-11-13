@@ -231,6 +231,8 @@ async function buildJourney(chapters, key, rawKey, numbers) {
       songs.at(u);
     },
   });
+  /* Solo in locale: per provare i luoghi dalla console. */
+  if (location.hostname === "127.0.0.1") window.__journey = journey;
 
   roam = createRoam({ journey });
 

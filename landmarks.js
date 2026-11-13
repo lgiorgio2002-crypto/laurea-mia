@@ -4,6 +4,7 @@
 // vertici: un luogo intero costa due chiamate di disegno.
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { loadLego, makeBuildable } from "./lego.js";
 
 const color = new THREE.Color();
 const lerp1 = THREE.MathUtils.lerp;
@@ -381,6 +382,7 @@ export const LANDMARKS = {
   /* Via Eleonora d'Arborea: palazzi di mattone salmone con le persiane verdi,
      il blocco bianco a balconate, il grande pino e le auto parcheggiate. */
   homeStreet: {
+    lego: { file: "models/homeStreet.glb" },
     side: 1,
     offset: 26,
     look: 12,
@@ -414,6 +416,7 @@ export const LANDMARKS = {
   /* Via Gronchi a Melfi: condomini corallo e terracotta con i balconi ad arco,
      i muretti con il cancello, il prato davanti. */
   melfiStreet: {
+    lego: { file: "models/melfiStreet.glb" },
     side: 1,
     offset: 25,
     look: 9,
@@ -442,6 +445,7 @@ export const LANDMARKS = {
      balconata, il timpano spezzato con lo stemma; ala gialla a sinistra, ala
      di mattoni a riquadri a destra, e il grande pino inclinato. */
   luissVilla: {
+    lego: { file: "models/luissVilla.glb" },
     side: 1,
     offset: 36,
     look: 12,
@@ -553,6 +557,7 @@ export const LANDMARKS = {
   /* LUISS, il corpo nuovo: la scatola grigia con la vetrata lunga, sospesa sopra
      la corte, il soffitto di legno, i tavolini rossi, la casa gialla accanto. */
   luissGlass: {
+    lego: { file: "models/luissGlass.glb" },
     side: -1,
     offset: 30,
     look: 9,
@@ -620,6 +625,7 @@ export const LANDMARKS = {
   /* Aula Chiesa: il pulmino la percorre sulla striscia di marmo, tra le colonne
      gialle con i capitelli corinzi, le finestre ad arco in alto, la volta. */
   aula: {
+    lego: { file: "models/aula.glb", masses: [{ x: 0, z: 14.5, w: 68, d: 2 }, { x: 0, z: -14.5, w: 68, d: 2 }] },
     side: 0,
     offset: 0,
     look: 9,
@@ -789,6 +795,7 @@ export const LANDMARKS = {
      angeli, l'acqua lunga davanti, la cupola color piombo con i costoloni chiari,
      il tamburo a colonne binate, e Castel Sant'Angelo a destra sopra le mura. */
   tiber: {
+    lego: { file: "models/tiber.glb" },
     surf: 2,
     side: 1,
     offset: 66,
@@ -920,6 +927,7 @@ export const LANDMARKS = {
      gradini dove è crollato, dentro la cavea di cotto con le volte radiali e i
      sotterranei. La camera sale per guardarci dentro. */
   colosseum: {
+    lego: { file: "models/colosseum.glb", masses: [{ x: 0, z: 0, w: 66, d: 56 }] },
     surf: 2,
     side: 1,
     offset: 66,
@@ -1057,6 +1065,7 @@ export const LANDMARKS = {
      la cupola a gradoni, il mattone della rotonda; ai lati i palazzi d'ocra e
      d'arancio con le persiane, il portone rosso, il dehors sui sampietrini. */
   pantheon: {
+    lego: { file: "models/pantheon.glb", masses: [{ x: 0, z: -26, w: 40, d: 40 }, { x: -37, z: 12, w: 30, d: 16 }, { x: 37, z: 12, w: 30, d: 16 }] },
     side: 1,
     offset: 58,
     look: 14,
@@ -1146,6 +1155,7 @@ export const LANDMARKS = {
   /* Il Vittoriano: la scalea, l'altare, il portico curvo di colonne corinzie, i
      due propilei con le quadrighe alate in cima. */
   vittoriano: {
+    lego: { file: "models/vittoriano.glb", masses: [{ x: 0, z: -9, w: 112, d: 82 }] },
     surf: 0,
     side: 1,
     offset: 62,
@@ -1287,6 +1297,7 @@ export const LANDMARKS = {
      vasca ovale con la ringhiera e i paracarri, la scalinata con le azalee, la
      Trinità dei Monti e l'obelisco, i palazzi rossi e gialli accesi. */
   spagna: {
+    lego: { file: "models/spagna.glb", masses: [{ x: 0, z: 26, w: 30, d: 14 }, { x: 0, z: -24, w: 46, d: 54 }] },
     side: -1,
     offset: 44,
     look: 12,
@@ -1486,6 +1497,7 @@ export const LANDMARKS = {
      balaustra e gli arbusti; dietro la torre di mattoni con gli archetti e le
      finestre bianche, e a destra il palazzo chiaro. */
   tower: {
+    lego: { file: "models/tower.glb" },
     side: -1,
     offset: 24,
     look: 17,
@@ -1607,6 +1619,11 @@ export const LANDMARKS = {
      ferri dei balconi e le lanterne a muro, il selciato, il carro bianco e giallo
      sulle rotaie, i fili in aria, la luce in fondo. */
   tram: {
+    lego: {
+      file: "models/tram.glb",
+      extra: [{ file: "models/tramStreet.glb", pivotZ: 6, tiltX: 0.16 }],
+      mover: { file: "models/tramCar.glb", rig: { rotY: Math.PI / 2, tilt: 0.16, x: 0, y: 0.1, z: 6, base: 30, range: 16 } },
+    },
     side: 1,
     offset: 12,
     look: 9,
@@ -1725,6 +1742,7 @@ export const LANDMARKS = {
      basso sull'acqua alla sua sinistra, le garitte, i merli a scudo, e la
      passerella di legno con il parapetto rosso che arriva da riva. */
   belem: {
+    lego: { file: "models/belem.glb", masses: [{ x: -3, z: 0, w: 30, d: 30 }] },
     surf: 2,
     side: -1,
     offset: 58,
@@ -1872,6 +1890,7 @@ export const LANDMARKS = {
      torrioni chiari sull'acqua, i tetti di cotto, l'Arco di Rua Augusta, Dom José
      sul suo basamento bianco, e le grandi losanghe bianche sul selciato. */
   comercio: {
+    lego: { file: "models/comercio.glb" },
     side: -1,
     offset: 100,
     look: 12,
@@ -1996,6 +2015,7 @@ export const LANDMARKS = {
      volumi bianchi a doppia altezza con i nastri di vetro, la piazza con i
      lucernari nel pavimento, i padiglioni col tetto verde, i prati verso il mare. */
   nova: {
+    lego: { file: "models/nova.glb", masses: [{ x: 0, z: -9, w: 156, d: 22 }] },
     side: 1,
     offset: 50,
     look: 9,
@@ -2073,6 +2093,7 @@ export const LANDMARKS = {
      le mura scure di salsedine col ciglio chiaro, i bastioni a punta, la casa con
      il tetto arancione, il faro, la bandiera, la spiaggia che comincia a ovest. */
   carcavelos: {
+    lego: { file: "models/carcavelos.glb", masses: [{ x: 0, z: 0, w: 90, d: 44 }, { x: 38, z: -32, w: 26, d: 22 }, { x: -34, z: -32, w: 26, d: 22 }] },
     surf: 2,
     side: -1,
     offset: 58,
@@ -2169,6 +2190,7 @@ export const LANDMARKS = {
      al tramonto: chi passeggia, i surfisti, la pozza di marea che fa da specchio,
      gli ombrelloni, il ristorante basso con le palme, il chiosco tondo. */
   sunsetBeach: {
+    lego: { file: "models/sunsetBeach.glb" },
     side: -1,
     offset: 70,
     look: 3,
@@ -2261,6 +2283,57 @@ function signMesh({ text, w, h, x, y, z, ink, ground, font }) {
 /* Costruisce un luogo: un gruppo pronto da mettere lungo la strada. */
 export function buildLandmark(name, solid, glow) {
   const spec = LANDMARKS[name];
+  if (spec.lego) {
+    /* Il modello a mattoncini arriva dopo: intanto il gruppo è vuoto. */
+    const group = new THREE.Group();
+    /* I luoghi a mattoncini si montano mentre il pulmino arriva. */
+    let progress = 1;
+    const setters = [];
+    const add = (file, parent, build = true) =>
+      loadLego(file).then((scene) => {
+        const model = scene.clone();
+        model.traverse((o) => {
+          if (!o.isMesh) return;
+          o.receiveShadow = true;
+          o.castShadow = !o.isInstancedMesh;
+        });
+        parent.add(model);
+        if (build) {
+          const set = makeBuildable(model);
+          set(progress);
+          setters.push(set);
+        }
+      });
+    add(spec.lego.file, group);
+    /* Pezzi in più: una strada inclinata intorno al suo perno. */
+    for (const extra of spec.lego.extra ?? []) {
+      const pivot = new THREE.Group();
+      pivot.position.z = extra.pivotZ ?? 0;
+      pivot.rotation.x = extra.tiltX ?? 0;
+      group.add(pivot);
+      add(extra.file, pivot);
+    }
+    /* Il carro che sale e scende sul suo telaio inclinato. */
+    let mover = null;
+    const rig = spec.lego.mover?.rig;
+    if (rig) {
+      mover = new THREE.Group();
+      const turn = new THREE.Group();
+      const tilt = new THREE.Group();
+      turn.rotation.y = rig.rotY;
+      turn.position.set(rig.x, rig.y, rig.z);
+      tilt.rotation.z = rig.tilt;
+      turn.add(tilt);
+      tilt.add(mover);
+      group.add(turn);
+      add(spec.lego.mover.file, mover, false);
+    }
+    const setBuild = (p) => {
+      progress = p;
+      for (const set of setters) set(p);
+    };
+    return { group, spec, mover, moverBase: rig?.base ?? 0, moverRange: rig?.range ?? 20, masses: spec.lego.masses ?? [], setBuild };
+  }
   const kit = new Kit();
   kit.surf = spec.surf ?? 0;
   spec.build(kit);

@@ -11,6 +11,25 @@ import { createBus } from "./bus.js";
 import { FINALE_SKY, PALETTES, PARTICLES, THANKS } from "./chapters.js";
 import { buildLandmark, facadeRelief, facadeTexture, groundTexture, LANDMARKS, weatherFacade } from "./landmarks.js";
 import { CITIES, onBeachFront, onLand, outlines, ROUTE } from "./map.js";
+import { kitPieces, street, streetMaterial, studNormalMap, studShadeMap } from "./lego.js";
+
+/* Il kit a mattoncini delle strade: ogni forma ha il suo modello, portato
+   dentro la scatola della forma che sostituisce. "turn" gira la facciata
+   delle case verso la strada (il loro -x locale). */
+const HOUSE_BOX = [[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]];
+const LEGO_KIT = {
+  tree: { box: [[-1, -2.3, -1], [1, 1, 1]] },
+  pine: { box: [[-4.2, -16, -4.2], [4.2, 1.6, 4.2]] },
+  hedge: { box: [[-1, -1, -1], [1, 1, 1]] },
+  post: { box: [[-0.6, 0, -0.6], [0.6, 5.6, 0.6]] },
+  vase: { box: [[-0.6, 0, -0.6], [0.6, 1.2, 0.6]] },
+  bloom: { box: [[-1, -1, -1], [1, 1, 1]] },
+  car: { box: [[-1.95, -0.62, -0.85], [1.95, 0.8, 0.85]] },
+  hill: { box: [[-1, -0.1, -1], [1, 1, 1]] },
+};
+for (const style of ["salmon", "coral", "ochre", "rust", "red", "brick", "yellowBrick", "lisbon", "lisbonY", "lisbonB"]) LEGO_KIT[style] = { box: HOUSE_BOX, turn: -Math.PI / 2 };
+/* Con il kit, tetti a cono e tronchi a parte non servono più. */
+const KIT_SKIPS = ["trunk", "pineTrunk", "roof"];
 
 /* Un passo fermo dura così, in secondi. I tocchi in coda lo accorciano. */
 const STEP_TIME = 0.95;
@@ -653,6 +672,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const palettes = preparePalettes();
   const skyStops = buildSkyStops(beats, finale, total);
   const isPhone = Math.min(window.innerWidth, window.innerHeight) < 700;
+  let peek = null;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isPhone, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isPhone ? 1.6 : 1.75));
@@ -736,7 +756,23 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       return g;
     })
   );
-  const groundMat = surface({ color: 0xffffff, side: THREE.DoubleSide, map: groundTexture(isPhone ? 256 : 512) });
+  /* La terra è una grande piastra verde (il Green dei mattoncini, 2). */
+  const BASEPLATE = new THREE.Color("#237841");
+  const plateShade = studShadeMap(aniso);
+  plateShade.repeat.setScalar(60 / 1.32);
+  const groundMat = surface({ color: 0xffffff, side: THREE.DoubleSide, map: plateShade, roughness: 0.6 });
+  /* Tutto a mattoncini: la terra è una grande piastra coi bottoncini. Le uv
+     della terra fanno un giro ogni 60 unità, un bottoncino è 1,32. */
+  const studs = studNormalMap(aniso);
+  const studded = (mat, perUnit) => {
+    const t = studs.clone();
+    t.repeat.setScalar(perUnit / 1.32);
+    t.needsUpdate = true;
+    mat.normalMap = t;
+    mat.normalScale = new THREE.Vector2(1.2, 1.2);
+    mat.needsUpdate = true;
+  };
+  studded(groundMat, 60);
   const ground = new THREE.Mesh(landGeo, groundMat);
   ground.frustumCulled = false;
   ground.receiveShadow = true;
@@ -754,6 +790,12 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     const up = new Float32Array(pos.length);
     for (let i = 1; i < up.length; i += 3) up[i] = 1;
     g.setAttribute("normal", new THREE.BufferAttribute(up, 3));
+    const uv = new Float32Array((pos.length / 3) * 2);
+    for (let i = 0; i < pos.length / 3; i++) {
+      uv[i * 2] = pos[i * 3] / 60;
+      uv[i * 2 + 1] = pos[i * 3 + 2] / 60;
+    }
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     return g;
   }
   const shift = (line, dz) => line.map(([x, z]) => [x, z + dz]);
@@ -768,6 +810,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
   /* Sabbia: un po' sulla terra, poi giù verso l'acqua. */
   const sandMat = surface({ color: "#ecd6a4", side: THREE.DoubleSide });
+  studded(sandMat, 60);
   const wetMat = flat("#a98a5e", { side: THREE.DoubleSide });
   const sand = new THREE.Mesh(mergeGeometries([strip(shift(shape.sand, -72), shape.sand, -0.03, -0.03), strip(shape.sand, shift(shape.sand, 30), -0.03, -1.6)]), sandMat);
   sand.frustumCulled = false;
@@ -843,7 +886,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   /* La strada: selciato, cordolo di pietra, marciapiede. Sotto l'aula e sui
      ponti il marciapiede sparisce. */
   const along = (offsets, height) => mergeGeometries(legs.map((l) => ribbon(l.start, l.end, 2.5, offsets, height)));
-  const roadMat = surface({ side: THREE.DoubleSide, roughness: 0.82, map: scan("cobble"), normalMap: scan("cobble_nor", false), normalScale: new THREE.Vector2(1.1, 1.1) });
+  /* La strada è una piastra liscia grigio scuro, come quelle dei set. */
+  const roadMat = surface({ side: THREE.DoubleSide, roughness: 0.55, color: "#5d6265" });
   /* Appena sopra le piazze dei luoghi, che arrivano fino a bordo strada. */
   const road = new THREE.Mesh(along([-ROAD_HALF, ROAD_HALF], () => 0.09), roadMat);
   road.frustumCulled = false;
@@ -852,7 +896,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     const p = roadPoint(s);
     return !onLand(p.x, p.z, 8) || beats.some((b) => b.through && Math.abs(s - b.s) < 38);
   };
-  const walkMat = surface({ side: THREE.DoubleSide, roughness: 0.92, map: scan("paving"), normalMap: scan("paving_nor", false) });
+  /* Il marciapiede: piastre chiare coi bottoncini. */
+  const walkMat = surface({ side: THREE.DoubleSide, roughness: 0.7, color: "#c9c6bd" });
+  studded(walkMat, TILE);
   const kerbY = (s) => (sunk(s) ? -0.8 : 0.15);
   const walk = new THREE.Mesh(mergeGeometries([along([ROAD_HALF, WALK_HALF], (o, s) => kerbY(s)), along([-WALK_HALF, -ROAD_HALF], (o, s) => kerbY(s))]), walkMat);
   walk.frustumCulled = false;
@@ -941,7 +987,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     dummy.scale.set(sx, sy, sz);
     dummy.rotation.set(0, rotY, 0);
     dummy.updateMatrix();
-    instances[kind].push({ matrix: dummy.matrix.clone(), color: new THREE.Color(color) });
+    instances[kind].push({ matrix: dummy.matrix.clone(), color: new THREE.Color(color), s });
   }
 
   const pick = (list) => list[Math.floor(rng() * list.length)];
@@ -994,7 +1040,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
         const before = instances.roof.length;
         const style = pick(styles);
         const total = Object.values(instances).reduce((n, l) => n + l.length, 0);
-        put(style, s, side * (min + 8), h / 2, every + 0.5, h, 16, "#ffffff", r);
+        /* La facciata guarda la strada da tutti e due i lati. */
+        put(style, s, side * (min + 8), h / 2, every + 0.5, h, 16, "#ffffff", r + (side < 0 ? Math.PI : 0));
         if (Object.values(instances).reduce((n, l) => n + l.length, 0) > total && before === instances.roof.length) {
           put("roof", s, side * (min + 8), h + 1.5, every + 1.6, 3, 17.4, pick(["#b5683f", "#a85a35", "#c2734a", "#9c5232"]), r, true);
         }
@@ -1307,8 +1354,40 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   };
   for (const style of BUILDINGS) shapes[style] = [new THREE.BoxGeometry(1, 1, 1), facadeMaterial(style)];
 
+  /* Le forme col loro modello a mattoncini: istanze per ogni colore del
+     modello, che si montano quando il pulmino si avvicina. */
+  const kitFor = (kind, list) => {
+    const spec = LEGO_KIT[kind];
+    kitPieces(`models/kit-${kind}.glb`, spec.box, spec.turn ?? 0)
+      .then(({ pieces, drop }) => {
+        const atS = new THREE.InstancedBufferAttribute(new Float32Array(list.map((item) => item.s)), 1);
+        for (const piece of pieces) {
+          piece.geometry.setAttribute("atS", atS);
+          const material = streetMaterial(piece.paint ? piece.material.clone() : piece.material, drop);
+          if (piece.paint) material.color.set("#ffffff");
+          const mesh = new THREE.InstancedMesh(piece.geometry, material, list.length);
+          list.forEach((item, i) => {
+            mesh.setMatrixAt(i, item.matrix);
+            if (piece.paint) mesh.setColorAt(i, item.color);
+          });
+          mesh.frustumCulled = false;
+          mesh.receiveShadow = !isPhone;
+          world.add(mesh);
+        }
+      })
+      .catch((e) => {
+        console.warn("Kit a mattoncini non disponibile:", kind, e);
+        legacy(kind, list);
+      });
+  };
+  const hasKit = Object.keys(LEGO_KIT).some((k) => instances[k]?.length);
   for (const [kind, list] of Object.entries(instances)) {
     if (!list.length) continue;
+    if (LEGO_KIT[kind]) kitFor(kind, list);
+    else if (!(hasKit && KIT_SKIPS.includes(kind))) legacy(kind, list);
+  }
+
+  function legacy(kind, list) {
     const mesh = new THREE.InstancedMesh(shapes[kind][0], shapes[kind][1], list.length);
     list.forEach((item, i) => {
       mesh.setMatrixAt(i, item.matrix);
@@ -2033,7 +2112,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     skyLook.set(Math.sin(mix.sunAz) * Math.cos(mix.sunEl), Math.sin(mix.sunEl), -Math.cos(mix.sunAz) * Math.cos(mix.sunEl));
     skyUniforms.uSunDir.value.copy(skyLook);
     world.fog.color.copy(mix.low);
-    groundMat.color.copy(mix.ground).lerp(paved, 0.62).multiplyScalar(1.7);
+    groundMat.color.copy(BASEPLATE).lerp(mix.ground, 0.12);
     
     hemi.color.copy(mix.hemi);
     hemi.groundColor.copy(mix.hemiLow);
@@ -2313,6 +2392,8 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     currentAir(skyAt);
 
     const s = roam.on ? roam.odo : distanceAt(u);
+    /* Le case e gli alberi si montano davanti al pulmino; in giro libero è tutto già su. */
+    street.uBusS.value = roam.on ? 1e9 : s;
     if (roam.on) {
       pBus.set(roam.x, 0, roam.z);
       pDir.set(Math.sin(roam.camH), 0, -Math.cos(roam.camH));
@@ -2365,7 +2446,10 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       const away = Math.hypot(b.place[0] - pBus.x, b.place[1] - pBus.z);
       b.entry.group.visible = away < (isPhone ? 300 : 430);
       /* I luoghi salgono piano dopo piano mentre ci si avvicina, come l'Emma. */
-      b.entry.group.scale.y = Math.max(0.001, easeInOut(1 - smooth(isPhone ? 170 : 230, isPhone ? 290 : 410, away)));
+      const grow = 1 - smooth(isPhone ? 170 : 230, isPhone ? 290 : 410, away);
+      /* Quelli a mattoncini si montano pezzo per pezzo, gli altri salgono. */
+      if (b.entry.setBuild) b.entry.setBuild(grow);
+      else b.entry.group.scale.y = Math.max(0.001, easeInOut(grow));
       if (b.entry.mover) {
         const e = b.entry;
         e.mover.position.x = e.moverBase + (roam.on ? Math.sin(t * 0.3) : lerp(-1, 1, clamp((u - b.u0) / (b.u1 - b.u0), 0, 1))) * e.moverRange;
@@ -2645,6 +2729,18 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       onThanks?.(thanked);
     }
 
+    /* Solo per le prove: la camera dall'alto su un luogo, senza foto. */
+    if (peek) {
+      const b = beats.find((x) => x.landmark === peek.landmark);
+      b.entry.group.updateMatrixWorld(true);
+      camera.position.copy(b.entry.group.localToWorld(vLocal.set(...peek.from)));
+      camera.lookAt(b.entry.group.localToWorld(vB.set(0, 10, 0)));
+      for (const p of prints) p.mesh.visible = false;
+      if (world.fog) {
+        world.fog.near = 4000;
+        world.fog.far = 9000;
+      }
+    }
     renderer.render(world, camera);
   }
 
@@ -2709,6 +2805,15 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     drive(gas, steer) {
       roam.gas = gas;
       roam.steer = steer;
+    },
+    /* Per le prove: guarda un luogo da un punto del suo sistema, o smetti (null). */
+    peek(landmark, from = [0, 260, 320]) {
+      peek = landmark ? { landmark, from } : null;
+    },
+    /* Porta il viaggio davanti a un luogo: serve a provarli uno a uno. */
+    goTo(landmark) {
+      const b = beats.find((x) => x.landmark === landmark);
+      if (b) want = stops.indexOf((b.u0 + b.u1) / 2);
     },
     /* Salta davanti a un luogo della mappa. */
     jumpTo(landmark) {
