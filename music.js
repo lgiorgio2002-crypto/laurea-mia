@@ -20,12 +20,19 @@ export function createMusic({ container, song, onChange }) {
   const state = { playing: false, everStarted: false, duration: 0 };
 
   const isPreview = () => state.duration > 0 && state.duration <= PREVIEW_MAX_MS;
+  /* Chi non è collegato sente solo anteprime di 30 secondi: un inizio a 0:53
+     cadrebbe oltre la fine e la canzone risulterebbe già finita. Lo si scopre
+     dalla prima canzone e da lì le altre partono da capo. */
+  let previewOnly = false;
+  const startAt = (song) => (previewOnly ? 0 : song.start);
 
   function onUpdate(data) {
     state.duration = data.duration;
+    if (isPreview()) previewOnly = true;
     state.playing = !data.isPaused && !data.isBuffering && data.position < data.duration;
     if (state.playing) {
       state.everStarted = true;
+      state.everStartedHere = true;
       fresh = false;
     }
     document.documentElement.dataset.music = state.playing ? "playing" : "paused";
@@ -54,7 +61,11 @@ export function createMusic({ container, song, onChange }) {
     else controller.resume();
     setTimeout(() => {
       /* Un aggiornamento del player non basta: può dire solo "in pausa". */
-      if (mine === run && !state.playing && !userPaused && attempt < 8) start(attempt + 1, mine);
+      if (mine !== run || state.playing || userPaused || attempt >= 8) return;
+      /* Una canzone appena cambiata che non è ancora partita va avviata con
+         "play": "resume" su di lei non fa niente. */
+      if (!state.everStartedHere) fresh = true;
+      start(attempt + 1, mine);
     }, 1200);
   }
 
@@ -62,7 +73,7 @@ export function createMusic({ container, song, onChange }) {
     api.createController(container, { uri: current.uri, width: 300, height: 80 }, (c) => {
       controller = c;
       c.addListener("playback_update", (e) => onUpdate(e.data));
-      c.loadUri(current.uri, false, current.start);
+      c.loadUri(current.uri, false, startAt(current));
       if (unlocked) start();
     });
   };
@@ -88,10 +99,11 @@ export function createMusic({ container, song, onChange }) {
       fresh = true;
       /* Quello che il player diceva valeva per la canzone di prima. */
       state.playing = false;
+      state.everStartedHere = false;
       state.duration = 0;
       run++;
       if (!controller) return;
-      controller.loadUri(current.uri, false, current.start);
+      controller.loadUri(current.uri, false, startAt(current));
       /* Il player ci mette un attimo a caricare: "play" subito andrebbe perso. */
       const mine = run;
       if (unlocked && !userPaused) setTimeout(() => start(0, mine), 500);
