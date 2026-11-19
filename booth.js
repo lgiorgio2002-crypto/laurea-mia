@@ -51,8 +51,10 @@ function drawCover(ctx, source, sw, sh, dw, dh) {
   ctx.drawImage(source, (sw - w) / 2, (sh - h) / 2, w, h, 0, 0, dw, dh);
 }
 
-export function createBooth({ onPhoto, wall }) {
+export function createBooth({ onPhoto, onSkip, wall }) {
+  const arrive = document.getElementById("arrive");
   const cameraButton = document.getElementById("cameraButton");
+  const skipButton = document.getElementById("skipButton");
   const booth = document.getElementById("booth");
   const video = document.getElementById("boothVideo");
   const shutter = document.getElementById("boothShutter");
@@ -71,6 +73,8 @@ export function createBooth({ onPhoto, wall }) {
   let current = null;
   let arrived = false;
   let shooting = false;
+  /* Chi ha scelto di non lasciare una foto non se la vede richiedere. */
+  let skipped = false;
   /* share: la foto pubblicata e il gettone per toglierla. stale: quella
      pubblicata non è più l'ultima scattata. */
   let share = null;
@@ -87,7 +91,7 @@ export function createBooth({ onPhoto, wall }) {
   }
 
   function sync() {
-    cameraButton.hidden = !arrived || !!current;
+    arrive.hidden = !arrived || !!current || skipped;
     after.hidden = !arrived || !current;
     const live = share && !stale;
     const canPublish = wall?.open && current && !live;
@@ -237,6 +241,11 @@ export function createBooth({ onPhoto, wall }) {
   }
 
   cameraButton.addEventListener("click", openBooth);
+  skipButton.addEventListener("click", () => {
+    skipped = true;
+    sync();
+    onSkip?.();
+  });
   retake.addEventListener("click", openBooth);
   shutter.addEventListener("click", shoot);
   close.addEventListener("click", stopCamera);

@@ -1757,7 +1757,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
   /* Le foto degli ospiti esistono solo nel finale, e piccole: un telefono ne
      deve reggere decine insieme alle 29 del viaggio. */
-  const MAX_GUESTS = 60;
+  const MAX_GUESTS = isPhone ? 30 : 60;
   let guests = 0;
 
   function addGuest(image) {
@@ -1772,7 +1772,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     fillPrint(p, image, 640);
   }
 
-  function fillPrint(p, image, limit = isPhone ? 1024 : 1400) {
+  /* Sul telefono una foto a fuoco non supera i 600 pixel veri: 800 bastano, e
+     con oltre 60 foto la memoria della scheda grafica è il primo limite. */
+  function fillPrint(p, image, limit = isPhone ? 800 : 1400) {
     const LIMIT = limit;
     const scale = Math.min(1, LIMIT / Math.max(image.naturalWidth, image.naturalHeight));
     const c = document.createElement("canvas");
@@ -1817,7 +1819,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   world.add(selfie.mesh);
   /* 0 muro, 1 festa. shot misura il volo dalla camera al centro, hold la pausa
      prima della scritta, thanks la scritta che si compone. */
-  const party = { value: 0, target: 0, shot: 1, hold: 0, wait: 0, thanks: 0 };
+  /* patience: quanto aspetta la scritta senza foto. Infinity finché al
+     traguardo si deve ancora scegliere tra foto e Salta. */
+  const party = { value: 0, target: 0, shot: 1, hold: 0, wait: 0, thanks: 0, patience: 7 };
 
   /* ---------- Il volo di foto tra un luogo e l'altro ----------
      Stampe che arrivano dal fondo e superano la camera. Vivono nello spazio
@@ -1937,7 +1941,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
      e gli spazi tra le caselle a rendere leggibili le parole. */
   const plate = new THREE.Mesh(
     new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ color: "#2b2622", transparent: true, opacity: 0, depthWrite: false, fog: false })
+    new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false })
   );
   plate.visible = false;
   plate.frustumCulled = false;
@@ -1960,27 +1964,54 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     c.height = H;
     const g = c.getContext("2d", { willReadFrequently: true });
     const family = '"Arial Black", "Helvetica Neue", Roboto, system-ui, sans-serif';
+    /* Sotto la scritta di foto, la dedica in chiaro: le due insieme stanno al
+       centro del muro. */
+    const note = THANKS.sign ? [...((narrow ? THANKS.noteNarrow : THANKS.note) ?? []), THANKS.sign] : [];
     let size = H;
     g.font = `900 ${size}px ${family}`;
     const widest = Math.max(...lines.map((l) => g.measureText(l).width));
-    size = Math.min((size * W * 0.96) / widest, (H * 0.96) / (lines.length * 1.08));
+    size = Math.min((size * W * 0.96) / widest, (H * 0.96 * (note.length ? 0.55 : 1)) / (lines.length * 1.08));
+    const noteFont = (s) => `italic 700 ${s}px Georgia, "Times New Roman", serif`;
+    let noteSize = 100;
+    if (note.length) {
+      g.font = noteFont(noteSize);
+      const noteWidest = Math.max(...note.map((l) => g.measureText(l).width));
+      noteSize = Math.min((noteSize * W * 0.9) / noteWidest, size * 0.34);
+    }
+    const lead = size * 1.08;
+    const noteLead = noteSize * 1.3;
+    const gap = note.length ? size * 0.3 : 0;
+    const top = (H - (lines.length * lead + gap + note.length * noteLead)) / 2;
     g.font = `900 ${size}px ${family}`;
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.fillStyle = g.strokeStyle = "#000";
+    g.fillStyle = g.strokeStyle = "#2b2622";
     g.lineJoin = "round";
     /* Il contorno ingrossa le lettere: i font sottili non reggerebbero la griglia. */
     g.lineWidth = size * 0.07;
-    const lead = size * 1.08;
     lines.forEach((l, i) => {
-      const y = H / 2 + (i - (lines.length - 1) / 2) * lead;
+      const y = top + (i + 0.5) * lead;
       g.fillText(l, W / 2, y);
       g.strokeText(l, W / 2, y);
     });
+    /* Le caselle si cercano solo nella scritta di foto, prima della dedica. */
+    const data = g.getImageData(0, 0, W, H).data;
+    if (note.length) {
+      g.font = noteFont(noteSize);
+      const noteTop = top + lines.length * lead + gap;
+      const body = note.slice(0, -1);
+      const bodyWidest = Math.max(0, ...body.map((l) => g.measureText(l).width));
+      const write = (l, x, y) => g.fillText(l, x, y);
+      body.forEach((l, i) => write(l, W / 2, noteTop + (i + 0.5) * noteLead));
+      /* La firma va a destra, sotto la fine delle righe. */
+      g.textAlign = "right";
+      write(note[note.length - 1], W / 2 + bodyWidest / 2, noteTop + (note.length - 0.5) * noteLead);
+    }
     plate.material.map?.dispose();
     plate.material.map = new THREE.CanvasTexture(c);
+    /* Il canvas è in sRGB: senza dirlo il marrone scuro diventerebbe grigio. */
+    plate.material.map.colorSpace = THREE.SRGBColorSpace;
     plate.material.needsUpdate = true;
-    const data = g.getImageData(0, 0, W, H).data;
     let cell = Math.max(10, Math.round(W / 76));
     let spots;
     for (;;) {
@@ -2378,10 +2409,10 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     party.value += (party.target - party.value) * (1 - Math.exp(-dt * 2.2));
     party.shot = Math.min(1, party.shot + dt / 1.9);
     if (selfie.ready && party.shot >= 1) party.hold += dt;
-    /* Senza foto la scritta arriva lo stesso, dopo un momento davanti al muro:
-       chi non vuole farsi fotografare non deve perdersi il resto. */
+    /* Senza foto la scritta arriva lo stesso: subito dopo Salta, o dopo un
+       momento davanti al muro se non c'è niente da scegliere. */
     party.wait = u > total - 0.4 ? party.wait + dt : 0;
-    if (party.hold > 2.4 || (!selfie.ready && party.wait > 7)) party.thanks = Math.min(1, party.thanks + dt / 4.4);
+    if (party.hold > 2.4 || (!selfie.ready && party.wait > party.patience)) party.thanks = Math.min(1, party.thanks + dt / 4.4);
     roam.blend = clamp(roam.blend + (roam.on ? dt : -dt) / 1.6, 0, 1);
     if (roam.on) updateRoam(dt);
 
@@ -2789,6 +2820,13 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       party.hold = 0;
       party.thanks = celebrate ? 0 : 1;
       if (!celebrate) party.value = 1;
+    },
+    /* Al traguardo c'è da scegliere: la scritta aspetta la foto o Salta. */
+    askForSelfie() {
+      party.patience = Infinity;
+    },
+    skipSelfie() {
+      party.patience = 0;
     },
     /* La guida libera. */
     enterRoam() {

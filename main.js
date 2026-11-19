@@ -83,13 +83,26 @@ async function decryptPhoto(key, n) {
   }
 }
 
-/* Ogni foto va nel capitolo del suo numero; quelle fuori da ogni intervallo
-   finiscono nell'ultimo, così una foto nuova non sparisce mai. */
-function arrangeChapters(numbers) {
-  const chapters = CHAPTERS.map((c) => ({ ...c, photos: [] }));
-  for (const n of [...numbers].sort((a, b) => a - b)) {
-    const home = chapters.find((c) => n >= c.from && n <= c.to) ?? chapters[chapters.length - 1];
+/* Ogni foto ("Roma 3") va nel capitolo del suo album che ne copre il numero;
+   quelle fuori da ogni intervallo finiscono nell'ultimo capitolo del loro
+   album, o nell'ultimo in assoluto, così una foto nuova non sparisce mai.
+   Le tappe dicono "prima della foto 3 dell'album": qui diventano il numero
+   online della prima foto da lì in poi. */
+function arrangeChapters(numbers, names) {
+  const chapters = CHAPTERS.map((c) => ({ ...c, photos: [], local: [] }));
+  numbers.forEach((n, k) => {
+    const [album, i] = (names?.[k] ?? "").split(" ");
+    const mine = chapters.filter((c) => c.album === album);
+    const home =
+      mine.find((c) => +i >= c.from && +i <= c.to) ?? mine[mine.length - 1] ?? chapters[chapters.length - 1];
     home.photos.push(n);
+    home.local.push(+i);
+  });
+  for (const c of chapters) {
+    c.stops = c.stops.map((s) => {
+      const k = c.local.findIndex((i) => i >= s.before);
+      return { ...s, before: k < 0 ? Infinity : c.photos[k] };
+    });
   }
   return chapters.filter((c) => c.photos.length);
 }
@@ -254,7 +267,12 @@ async function buildJourney(chapters, key, rawKey, numbers) {
 
   if (!key) return;
   const wall = WALL_API ? await createWall({ api: WALL_API, rawKey, key, onGuest: (img) => journey.addGuest(img) }) : null;
-  booth = createBooth({ onPhoto: (image, options) => journey.setSelfie(image, options), wall });
+  journey.askForSelfie();
+  booth = createBooth({
+    onPhoto: (image, options) => journey.setSelfie(image, options),
+    onSkip: () => journey.skipSelfie(),
+    wall,
+  });
   /* Le foto nuove arrivano da sole a chi è già al traguardo. */
   if (wall) {
     const poll = () => wall.refresh().then(() => booth.refresh());
@@ -287,15 +305,16 @@ function webglWorks() {
   const raw = takeKey();
   let key = null;
   let numbers = [];
+  let names = [];
   if (raw) {
     try {
       key = await window.LaureaCrypto.importKey(raw);
-      numbers = (await (await fetch("photos/manifest.json")).json()).photos;
+      ({ photos: numbers, names } = await (await fetch("photos/manifest.json")).json());
     } catch {
       key = null;
     }
   }
-  const chapters = key ? arrangeChapters(numbers) : [];
+  const chapters = key ? arrangeChapters(numbers, names) : [];
 
   if (reduceMotion || !webglWorks()) {
     if (key) buildSimple(chapters, key);

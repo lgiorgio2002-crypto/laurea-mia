@@ -296,15 +296,42 @@ button {
   transform: scale(0.94);
 }
 
-.camera {
+/* Al traguardo si sceglie: lasciare una foto o saltare. Una riga sola, per
+   coprire meno muro sul telefono. */
+.arrive {
   position: fixed;
-  left: 50%;
-  bottom: calc(22px + env(safe-area-inset-bottom));
-  width: 84px;
-  height: 84px;
-  margin-left: -42px;
-  background: var(--sun);
+  left: 16px;
+  /* A destra resta il posto del pulsante della musica. */
+  right: 84px;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 8px;
   z-index: 40;
+}
+
+@media (min-width: 600px) {
+  .arrive {
+    left: 50%;
+    right: auto;
+    width: 380px;
+    transform: translateX(-50%);
+  }
+}
+
+.arrive .share__button {
+  width: auto;
+  padding: 13px 14px;
+  white-space: nowrap;
+}
+
+.share__button.arrive__add {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--sun);
+  color: var(--ink);
   animation: invite 1.8s ease-in-out infinite;
 }
 
@@ -360,7 +387,7 @@ button {
   overflow: hidden;
 }
 
-.is-roaming .camera,
+.is-roaming .arrive,
 .is-roaming .after,
 .is-roaming .share,
 .is-roaming .hud,
@@ -664,9 +691,13 @@ button {
   <svg class="sound__play" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
 </button>
 
-<button class="round camera" id="cameraButton" type="button" aria-label="Scatta una foto al traguardo" hidden>
-  <svg viewBox="0 0 32 32" width="38" height="38" aria-hidden="true"><path d="M5 10h5.5l2-3.5h7l2 3.5H27a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><circle cx="16" cy="18" r="5.2" fill="none" stroke="currentColor" stroke-width="2.6"/></svg>
-</button>
+<div class="arrive" id="arrive" hidden>
+  <button class="share__button arrive__add" id="cameraButton" type="button">
+    <svg viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path d="M5 10h5.5l2-3.5h7l2 3.5H27a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><circle cx="16" cy="18" r="5.2" fill="none" stroke="currentColor" stroke-width="2.6"/></svg>
+    Aggiungi la tua foto
+  </button>
+  <button class="share__button share__remove" id="skipButton" type="button">Salta</button>
+</div>
 
 <div class="after" id="after" hidden>
   <button class="round" id="afterSave" type="button" aria-label="Salva la tua foto">

@@ -1,20 +1,24 @@
 // Il copione del viaggio. Tutto ciò che si cambia a mano sta qui.
 //
-// from, to: le foto del capitolo, per numero. L'ordine è quello dei numeri.
-// stops:    le tappe. before è la foto davanti a cui il pulmino rallenta e la
-//           camera mostra il luogo (nome in landmarks.js). sky è il momento
-//           della giornata che comincia lì (PALETTES). Dove sta ogni luogo
-//           è scritto in map.js.
+// album:    il nome delle foto in private/photos ("Bimbo 3.jpeg" = album Bimbo).
+// from, to: le foto del capitolo, per numero dentro l'album (to: 99 = fino
+//           all'ultima). Un album può essere diviso tra più capitoli.
+// stops:    le tappe. before è la foto (numero nell'album) davanti a cui il
+//           pulmino rallenta e la camera mostra il luogo (nome in
+//           landmarks.js). sky è il momento della giornata che comincia lì
+//           (PALETTES). Dove sta ogni luogo è scritto in map.js.
 // scenery:  il paesaggio lungo la strada, tra una tappa e l'altra.
 // grade:    la pellicola delle foto: 0 colore pieno, 1 stampa antica.
 // neon:     quanto le foto risentono delle luci della notte.
 
-// Le canzoni. Ogni capitolo ha la sua (campo song); SONG vale per i capitoli
-// senza canzone, FINALE_SONG suona dal GRAZIE in poi. start ed end sono in
-// secondi; end: null = fino alla fine. Chi non è collegato a Spotify sente
-// l'anteprima di 30 secondi scelta da Spotify, e start/end per lui non valgono.
+// Le canzoni. Ogni capitolo ha la sua (campo song); SONG apre il viaggio e
+// continua senza interruzioni per tutto l'album Bimbo, casa e Melfi (stessa
+// canzone = nessun cambio).
+// SONG vale anche per i capitoli senza canzone, FINALE_SONG suona dal GRAZIE
+// in poi. start ed end sono in secondi; end: null = fino alla fine.
+// Chi non è collegato a Spotify sente l'anteprima di 30 secondi scelta da
+// Spotify, e start/end per lui non valgono.
 export const SONG = { uri: "spotify:track:7wFEzF8FbofVlQS1OcbghM", start: 18, end: null };
-const SONG_MELFI = { uri: "spotify:track:70C4NyhjD5OZUMzvWZ3njJ", start: 53, end: null };
 const SONG_ROMA = { uri: "spotify:track:7vc09IDmFH0MfyPYHPEWRM", start: 33, end: null };
 const SONG_LISBONA = { uri: "spotify:track:2JnVkJsUnBs7kyvVzD8E6L", start: 24, end: null };
 export const FINALE_SONG = { uri: "spotify:track:7ppPZa3TRUSGKaks9wH7VT", start: 242, end: null };
@@ -23,19 +27,25 @@ export const FINALE_SONG = { uri: "spotify:track:7ppPZa3TRUSGKaks9wH7VT", start:
 // foto resta solo sul telefono di chi l'ha scattata.
 export const WALL_API = "https://laurea-wall.laurea-mia.workers.dev";
 
-// La scritta finale, fatta con le foto. Una riga per voce dell'elenco: su schermo
-// largo e su schermo stretto le parole vanno a capo in modo diverso.
+// La scritta finale. wide/narrow è fatta con le foto e deve restare corta:
+// con tante lettere le caselle diventano troppo grosse per leggerle. note è
+// scritta sotto, in chiaro, con la firma sign. Una riga per voce dell'elenco:
+// su schermo largo e su schermo stretto si va a capo in modo diverso.
 export const THANKS = {
-  wide: ["GRAZIE", "DI ESSERCI"],
-  narrow: ["GRAZIE", "DI", "ESSERCI"],
+  wide: ["GRAZIE"],
+  narrow: ["GRAZIE"],
+  note: ["È stato un lungo viaggio,", "grazie di averne fatto parte."],
+  noteNarrow: ["È stato un lungo viaggio,", "grazie di averne", "fatto parte."],
+  sign: "— Lollo",
 };
 
 export const CHAPTERS = [
   {
     id: "casa",
     song: SONG,
+    album: "Bimbo",
     from: 1,
-    to: 4,
+    to: 5,
     scenery: "romeStreet",
     particles: "dust",
     grade: 0.8,
@@ -44,52 +54,55 @@ export const CHAPTERS = [
   },
   {
     id: "melfi",
-    song: SONG_MELFI,
-    from: 5,
-    to: 9,
+    song: SONG,
+    album: "Bimbo",
+    from: 6,
+    to: 99,
     scenery: "melfi",
     particles: "pollen",
     grade: 0.2,
     neon: 0,
-    stops: [{ landmark: "melfiStreet", before: 5, sky: "cloudy" }],
+    stops: [{ landmark: "melfiStreet", before: 6, sky: "cloudy" }],
   },
   {
     id: "roma",
     song: SONG_ROMA,
-    from: 10,
-    to: 23,
+    album: "Roma",
+    from: 1,
+    to: 99,
     scenery: "romeCity",
     particles: "laurel",
     grade: 0,
     neon: 0.25,
     stops: [
-      { landmark: "luissVilla", before: 10, sky: "morning" },
-      { landmark: "luissGlass", before: 12, sky: "noon" },
-      { landmark: "aula", before: 14, sky: "afternoon" },
-      { landmark: "tiber", before: 16, sky: "sunset" },
-      { landmark: "vittoriano", before: 17, sky: "sunset" },
-      { landmark: "colosseum", before: 18, sky: "morning" },
-      { landmark: "pantheon", before: 20, sky: "morning" },
+      { landmark: "luissVilla", before: 1, sky: "morning" },
+      { landmark: "luissGlass", before: 3, sky: "noon" },
+      { landmark: "aula", before: 6, sky: "afternoon" },
+      { landmark: "tiber", before: 10, sky: "sunset" },
+      { landmark: "vittoriano", before: 14, sky: "sunset" },
+      { landmark: "colosseum", before: 17, sky: "morning" },
+      { landmark: "pantheon", before: 18, sky: "morning" },
       { landmark: "tower", before: 21, sky: "afternoon" },
-      { landmark: "spagna", before: 23, sky: "dusk" },
+      { landmark: "spagna", before: 25, sky: "dusk" },
     ],
   },
   {
     id: "lisbona",
     song: SONG_LISBONA,
-    from: 24,
+    album: "Lisboa",
+    from: 1,
     to: 99,
     scenery: "lisbon",
     particles: "spray",
     grade: 0,
     neon: 0,
     stops: [
-      { landmark: "tram", before: 24, sky: "noon" },
-      { landmark: "belem", before: 26, sky: "sunset" },
-      { landmark: "comercio", before: 27, sky: "morning" },
-      { landmark: "nova", before: 29, sky: "morning" },
-      { landmark: "carcavelos", before: 31, sky: "noon" },
-      { landmark: "sunsetBeach", before: 32, sky: "golden" },
+      { landmark: "tram", before: 1, sky: "noon" },
+      { landmark: "belem", before: 2, sky: "sunset" },
+      { landmark: "comercio", before: 3, sky: "morning" },
+      { landmark: "nova", before: 8, sky: "morning" },
+      { landmark: "carcavelos", before: 12, sky: "noon" },
+      { landmark: "sunsetBeach", before: 17, sky: "golden" },
     ],
   },
 ];
