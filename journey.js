@@ -2866,6 +2866,10 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     get navAmount() {
       return nav.amount;
     },
+    /* Per le prove: quante texture e geometrie stanno nella memoria grafica. */
+    get memory() {
+      return { ...renderer.info.memory };
+    },
     /* Le piante della mappa del navigatore, per la cartina di Esplora. */
     get footprints() {
       return nav.footprints;
