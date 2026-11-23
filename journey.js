@@ -8,28 +8,10 @@ import * as THREE from "three";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { createBus } from "./bus.js";
+import { createNavMap } from "./navmap.js";
 import { FINALE_SKY, PALETTES, PARTICLES, THANKS } from "./chapters.js";
 import { buildLandmark, facadeRelief, facadeTexture, groundTexture, LANDMARKS, weatherFacade } from "./landmarks.js";
 import { CITIES, onBeachFront, onLand, outlines, ROUTE } from "./map.js";
-import { kitPieces, street, streetMaterial, studNormalMap, studShadeMap } from "./lego.js";
-
-/* Il kit a mattoncini delle strade: ogni forma ha il suo modello, portato
-   dentro la scatola della forma che sostituisce. "turn" gira la facciata
-   delle case verso la strada (il loro -x locale). */
-const HOUSE_BOX = [[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]];
-const LEGO_KIT = {
-  tree: { box: [[-1, -2.3, -1], [1, 1, 1]] },
-  pine: { box: [[-4.2, -16, -4.2], [4.2, 1.6, 4.2]] },
-  hedge: { box: [[-1, -1, -1], [1, 1, 1]] },
-  post: { box: [[-0.6, 0, -0.6], [0.6, 5.6, 0.6]] },
-  vase: { box: [[-0.6, 0, -0.6], [0.6, 1.2, 0.6]] },
-  bloom: { box: [[-1, -1, -1], [1, 1, 1]] },
-  car: { box: [[-1.95, -0.62, -0.85], [1.95, 0.8, 0.85]] },
-  hill: { box: [[-1, -0.1, -1], [1, 1, 1]] },
-};
-for (const style of ["salmon", "coral", "ochre", "rust", "red", "brick", "yellowBrick", "lisbon", "lisbonY", "lisbonB"]) LEGO_KIT[style] = { box: HOUSE_BOX, turn: -Math.PI / 2 };
-/* Con il kit, tetti a cono e tronchi a parte non servono più. */
-const KIT_SKIPS = ["trunk", "pineTrunk", "roof"];
 
 /* Un passo fermo dura così, in secondi. I tocchi in coda lo accorciano. */
 const STEP_TIME = 0.95;
@@ -58,6 +40,7 @@ const WALK_HALF = 7.6;
 const HOUSE_WIDE = 20;
 const HOUSE_DEEP = 16;
 /* Quanto spazio libero chiede ogni luogo attorno a sé. */
+const NAV_MAP = true;
 const CLEARING = { tiber: 118, colosseum: 92, comercio: 135, nova: 104, pantheon: 72, luissVilla: 80, luissGlass: 62, aula: 62, vittoriano: 74, spagna: 72, tower: 50, belem: 40, tram: 92, carcavelos: 78, sunsetBeach: 70 };
 /* Guida libera. */
 const DRIVE = { top: 36, reverse: 12, accel: 20, brake: 34, drag: 9, turn: 1.7 };
@@ -692,7 +675,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   const key = new THREE.DirectionalLight(0xffffff, 1.4);
   world.add(hemi, key, key.target);
   key.castShadow = true;
-  key.shadow.mapSize.setScalar(isPhone ? 1024 : 2048);
+  key.shadow.mapSize.setScalar(isPhone ? 1024 : 3072);
   key.shadow.camera.left = key.shadow.camera.bottom = -170;
   key.shadow.camera.right = key.shadow.camera.top = 170;
   key.shadow.camera.near = 10;
@@ -756,23 +739,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       return g;
     })
   );
-  /* La terra è una grande piastra verde (il Green dei mattoncini, 2). */
-  const BASEPLATE = new THREE.Color("#237841");
-  const plateShade = studShadeMap(aniso);
-  plateShade.repeat.setScalar(60 / 1.32);
-  const groundMat = surface({ color: 0xffffff, side: THREE.DoubleSide, map: plateShade, roughness: 0.6 });
-  /* Tutto a mattoncini: la terra è una grande piastra coi bottoncini. Le uv
-     della terra fanno un giro ogni 60 unità, un bottoncino è 1,32. */
-  const studs = studNormalMap(aniso);
-  const studded = (mat, perUnit) => {
-    const t = studs.clone();
-    t.repeat.setScalar(perUnit / 1.32);
-    t.needsUpdate = true;
-    mat.normalMap = t;
-    mat.normalScale = new THREE.Vector2(1.2, 1.2);
-    mat.needsUpdate = true;
-  };
-  studded(groundMat, 60);
+  /* Tra le tappe il mondo è una mappa da navigatore: terra chiara, niente bottoncini. */
+  const BASEPLATE = new THREE.Color("#e9e7e1");
+  const groundMat = surface({ color: 0xffffff, side: THREE.DoubleSide, roughness: 0.95 });
   const ground = new THREE.Mesh(landGeo, groundMat);
   ground.frustumCulled = false;
   ground.receiveShadow = true;
@@ -810,7 +779,6 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
   /* Sabbia: un po' sulla terra, poi giù verso l'acqua. */
   const sandMat = surface({ color: "#ecd6a4", side: THREE.DoubleSide });
-  studded(sandMat, 60);
   const wetMat = flat("#a98a5e", { side: THREE.DoubleSide });
   const sand = new THREE.Mesh(mergeGeometries([strip(shift(shape.sand, -72), shape.sand, -0.03, -0.03), strip(shape.sand, shift(shape.sand, 30), -0.03, -1.6)]), sandMat);
   sand.frustumCulled = false;
@@ -887,9 +855,11 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
      ponti il marciapiede sparisce. */
   const along = (offsets, height) => mergeGeometries(legs.map((l) => ribbon(l.start, l.end, 2.5, offsets, height)));
   /* La strada è una piastra liscia grigio scuro, come quelle dei set. */
-  const roadMat = surface({ side: THREE.DoubleSide, roughness: 0.55, color: "#5d6265" });
+  const roadMat = surface({ side: THREE.DoubleSide, roughness: 0.8, color: "#bcc2ca" });
   /* Appena sopra le piazze dei luoghi, che arrivano fino a bordo strada. */
-  const road = new THREE.Mesh(along([-ROAD_HALF, ROAD_HALF], () => 0.09), roadMat);
+  /* Dove il pulmino attraversa un luogo (l'aula) la strada sta sotto il suo pavimento. */
+  const inside = (s) => beats.some((b) => b.through && Math.abs(s - b.s) < 36);
+  const road = new THREE.Mesh(along([-ROAD_HALF, ROAD_HALF], (o, s) => (inside(s) ? -0.3 : 0.09)), roadMat);
   road.frustumCulled = false;
   road.receiveShadow = true;
   const sunk = (s) => {
@@ -897,17 +867,16 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     return !onLand(p.x, p.z, 8) || beats.some((b) => b.through && Math.abs(s - b.s) < 38);
   };
   /* Il marciapiede: piastre chiare coi bottoncini. */
-  const walkMat = surface({ side: THREE.DoubleSide, roughness: 0.7, color: "#c9c6bd" });
-  studded(walkMat, TILE);
+  const walkMat = surface({ side: THREE.DoubleSide, roughness: 0.9, color: "#f6f5f1" });
   const kerbY = (s) => (sunk(s) ? -0.8 : 0.15);
   const walk = new THREE.Mesh(mergeGeometries([along([ROAD_HALF, WALK_HALF], (o, s) => kerbY(s)), along([-WALK_HALF, -ROAD_HALF], (o, s) => kerbY(s))]), walkMat);
   walk.frustumCulled = false;
   walk.receiveShadow = true;
-  const paintMat = surface({ color: "#c9c2b2", side: THREE.DoubleSide });
+  const paintMat = surface({ color: "#dcdad4", side: THREE.DoubleSide });
   const kerb = new THREE.Mesh(
     mergeGeometries(
       [1, -1].flatMap((e) => [
-        along([e * ROAD_HALF, e * ROAD_HALF * 0.999], (o, s) => (Math.abs(o) > ROAD_HALF * 0.9995 ? kerbY(s) : 0.09)),
+        along([e * ROAD_HALF, e * ROAD_HALF * 0.999], (o, s) => (inside(s) ? -0.8 : Math.abs(o) > ROAD_HALF * 0.9995 ? kerbY(s) : 0.09)),
         along(e > 0 ? [ROAD_HALF, ROAD_HALF + 0.4] : [-ROAD_HALF - 0.4, -ROAD_HALF], (o, s) => kerbY(s) + 0.01),
       ])
     ),
@@ -1083,7 +1052,9 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     }
   }
 
-  for (const c of chapters) {
+  /* Le case, gli alberi e le auto a mattoncini lungo la strada non ci sono più:
+     tra le tappe c'è la mappa del navigatore (navmap.js). */
+  for (const c of NAV_MAP ? [] : chapters) {
     const a = c.s0;
     const b = c.s1;
     if (c.scenery === "romeStreet") {
@@ -1354,38 +1325,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   };
   for (const style of BUILDINGS) shapes[style] = [new THREE.BoxGeometry(1, 1, 1), facadeMaterial(style)];
 
-  /* Le forme col loro modello a mattoncini: istanze per ogni colore del
-     modello, che si montano quando il pulmino si avvicina. */
-  const kitFor = (kind, list) => {
-    const spec = LEGO_KIT[kind];
-    kitPieces(`models/kit-${kind}.glb`, spec.box, spec.turn ?? 0)
-      .then(({ pieces, drop }) => {
-        const atS = new THREE.InstancedBufferAttribute(new Float32Array(list.map((item) => item.s)), 1);
-        for (const piece of pieces) {
-          piece.geometry.setAttribute("atS", atS);
-          const material = streetMaterial(piece.paint ? piece.material.clone() : piece.material, drop);
-          if (piece.paint) material.color.set("#ffffff");
-          const mesh = new THREE.InstancedMesh(piece.geometry, material, list.length);
-          list.forEach((item, i) => {
-            mesh.setMatrixAt(i, item.matrix);
-            if (piece.paint) mesh.setColorAt(i, item.color);
-          });
-          mesh.frustumCulled = false;
-          mesh.receiveShadow = !isPhone;
-          world.add(mesh);
-        }
-      })
-      .catch((e) => {
-        console.warn("Kit a mattoncini non disponibile:", kind, e);
-        legacy(kind, list);
-      });
-  };
-  const hasKit = Object.keys(LEGO_KIT).some((k) => instances[k]?.length);
-  for (const [kind, list] of Object.entries(instances)) {
-    if (!list.length) continue;
-    if (LEGO_KIT[kind]) kitFor(kind, list);
-    else if (!(hasKit && KIT_SKIPS.includes(kind))) legacy(kind, list);
-  }
+  for (const [kind, list] of Object.entries(instances)) if (list.length) legacy(kind, list);
 
   function legacy(kind, list) {
     const mesh = new THREE.InstancedMesh(shapes[kind][0], shapes[kind][1], list.length);
@@ -1471,6 +1411,10 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
       }
     }
   }
+
+  /* La mappa del navigatore: isolati, linea blu, pallino, cartello. */
+  const nav = createNavMap({ world, legs, beats, roadPoint, roadDir, onLand, onBeachFront, nearRoad, clearing: CLEARING, isPhone, walkHalf: WALK_HALF });
+  const vNav = new THREE.Vector3();
 
   /* Lampioni: dischi morbidi additivi. */
   const lampGeo = new THREE.BufferGeometry();
@@ -2077,6 +2021,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
   let last = performance.now();
   let focused = null;
   let shadowTick = 0;
+  let shadowExt = 170;
   let jolt = 0;
   let unlocked = false;
   const pointer = new THREE.Vector2();
@@ -2143,7 +2088,7 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     skyLook.set(Math.sin(mix.sunAz) * Math.cos(mix.sunEl), Math.sin(mix.sunEl), -Math.cos(mix.sunAz) * Math.cos(mix.sunEl));
     skyUniforms.uSunDir.value.copy(skyLook);
     world.fog.color.copy(mix.low);
-    groundMat.color.copy(BASEPLATE).lerp(mix.ground, 0.12);
+    groundMat.color.copy(BASEPLATE).lerp(mix.ground, 0.06);
     
     hemi.color.copy(mix.hemi);
     hemi.groundColor.copy(mix.hemiLow);
@@ -2205,8 +2150,18 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     const hv = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const usableH = hv * (vw / vh < 1 ? 0.62 : 0.74);
     const usableW = hv * (vw / vh) * 0.88;
-    const s = Math.min(usableW / p.w, usableH / p.h);
+    let s = Math.min(usableW / p.w, usableH / p.h);
     out.copy(camera.position).addScaledVector(camForward, dist).addScaledVector(camUp, hv * 0.05);
+    /* Col navigatore la foto si fa più piccola e si sposta: il pallino blu e
+       la linea del percorso, in basso al centro, restano scoperti. */
+    const k = nav.amount;
+    if (k > 0) {
+      const narrow = vw / vh < 1;
+      const e = k * k * (3 - 2 * k);
+      s *= 1 - e * (narrow ? 0.42 : 0.36);
+      if (narrow) out.addScaledVector(camUp, hv * 0.17 * e);
+      else out.addScaledVector(camRight, hv * (vw / vh) * 0.25 * e).addScaledVector(camUp, hv * 0.06 * e);
+    }
     outQ.copy(camera.quaternion);
     return s;
   }
@@ -2423,8 +2378,6 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     currentAir(skyAt);
 
     const s = roam.on ? roam.odo : distanceAt(u);
-    /* Le case e gli alberi si montano davanti al pulmino; in giro libero è tutto già su. */
-    street.uBusS.value = roam.on ? 1e9 : s;
     if (roam.on) {
       pBus.set(roam.x, 0, roam.z);
       pDir.set(Math.sin(roam.camH), 0, -Math.cos(roam.camH));
@@ -2472,6 +2425,16 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     pLook.copy(pBus).addScaledVector(pDir, lerp(4.5, 0, intro));
     pLook.y = pBus.y + lerp(1.8, 1.4, intro);
     if (stop && !stop.through) pLook.lerp(stop.centre, gapShape * (view ? 0.72 : camera.aspect < 1 ? 0.22 : 0.6));
+    /* Lontano dalle tappe: il navigatore. Camera alta dietro il pallino blu. */
+    const navK = nav.update({ s, u, t, dt, pBus, pDir, active: !roam.on && !stop && u > INTRO_UNITS && u < finale, roaming: roam.on });
+    bus.root.visible = navK < 0.5;
+    if (navK > 0) {
+      const ease = navK * navK * (3 - 2 * navK);
+      vNav.copy(pBus).addScaledVector(pDir, camera.aspect < 1 ? -30 : -36).setY(pBus.y + (camera.aspect < 1 ? 46 : 38));
+      camera.position.lerp(vNav, ease);
+      vNav.copy(pBus).addScaledVector(pDir, 20);
+      pLook.lerp(vNav, ease);
+    }
 
     for (const b of beats) {
       const away = Math.hypot(b.place[0] - pBus.x, b.place[1] - pBus.z);
@@ -2513,8 +2476,31 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
 
     /* Il sole basso allungherebbe le ombre all'infinito: per loro si ferma più in alto. */
     vC.set(skyLook.x, Math.max(skyLook.y, 0.5), skyLook.z).normalize();
-    key.position.copy(pBus).addScaledVector(vC, 300);
-    key.target.position.copy(pBus);
+    /* La foschia: in viaggio vicina, come una cartolina; alla tappa e col
+       navigatore si allontana, così i luoghi veri tengono colore e contrasto. */
+    const clear = Math.max(gapShape * (stop && !stop.through ? 1 : 0.4), navK * 0.6);
+    world.fog.near = lerp(70, 210, clear);
+    world.fog.far = lerp(330, 900, clear);
+    /* Alla tappa meno luce piatta e più sole: i modelli prendono forma. */
+    const stopLight = gapShape * (stop && !stop.through ? 1 : 0);
+    hemi.intensity *= lerp(1, 0.75, stopLight);
+    key.intensity *= lerp(1, 1.3, stopLight);
+    seaMat.uniforms.uFogNear.value = world.fog.near;
+    seaMat.uniforms.uFogFar.value = world.fog.far;
+    /* Alla tappa l'ombra stringe sul luogo: stessa mappa, metà spazio, ombre
+       nitide sui modelli veri. In viaggio torna larga intorno al pallino. */
+    const shadowStop = stop && !stop.through ? stop : null;
+    const wantExt = shadowStop ? Math.max(70, (CLEARING[shadowStop.landmark] ?? 70) + 30) : 170;
+    shadowExt += (wantExt - shadowExt) * (1 - Math.exp(-dt * 3));
+    if (Math.abs(key.shadow.camera.right - shadowExt) > 0.5) {
+      key.shadow.camera.left = key.shadow.camera.bottom = -shadowExt;
+      key.shadow.camera.right = key.shadow.camera.top = shadowExt;
+      key.shadow.camera.updateProjectionMatrix();
+    }
+    vNav.copy(pBus);
+    if (shadowStop) vNav.lerp(shadowStop.centre, gapShape).setY(pBus.y);
+    key.position.copy(vNav).addScaledVector(vC, 300);
+    key.target.position.copy(vNav);
     /* Il mondo sta fermo: l'ombra si ricalcola ogni tanto, non a ogni fotogramma. */
     shadowTick = (shadowTick + 1) % (isPhone ? 10 : 4);
     if (!shadowTick) renderer.shadowMap.needsUpdate = true;
@@ -2871,6 +2857,21 @@ export function createJourney({ canvas, chapters, onProgress, onFocusPrint, onRe
     /* Il tocco su Play è il primo passo. */
     advance() {
       step(1);
+    },
+    /* Per le prove: salta a un punto esatto del viaggio, e dice quanto è navigatore. */
+    seek(x) {
+      waitingMusic = true;
+      u = target = x;
+    },
+    get navAmount() {
+      return nav.amount;
+    },
+    /* Le piante della mappa del navigatore, per la cartina di Esplora. */
+    get footprints() {
+      return nav.footprints;
+    },
+    get beatsInfo() {
+      return beats.map((b) => ({ landmark: b.landmark, u0: b.u0, u1: b.u1, s: b.s }));
     },
     /* La musica c'è: il pulmino può muoversi. */
     release() {

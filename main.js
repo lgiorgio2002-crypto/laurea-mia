@@ -248,6 +248,11 @@ async function buildJourney(chapters, key, rawKey, numbers) {
   if (location.hostname === "127.0.0.1") window.__journey = journey;
 
   roam = createRoam({ journey });
+  /* Solo in locale: ?esplora apre subito Esplora, senza rifare il viaggio. */
+  if (location.hostname === "127.0.0.1" && new URLSearchParams(location.search).has("esplora")) {
+    journey.unlock();
+    setTimeout(() => document.getElementById("roamButton").click(), 1500);
+  }
 
   /* Il primo gesto fa partire la canzone; il pulmino aspetta di sentirla. */
   const go = () =>

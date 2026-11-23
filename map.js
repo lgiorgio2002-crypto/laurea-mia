@@ -43,7 +43,7 @@ export const ROUTE = {
     path: [
       { via: at(ROMA, 560, -520) },
       { via: at(ROMA, 548, -380) },
-      { landmark: "homeStreet", name: "Casa", place: at(ROMA, 511, -180), heading: 180, side: 1 },
+      { landmark: "homeStreet", name: "Casa", tag: [1, 1], place: at(ROMA, 511, -180), heading: 180, side: 1 },
       { via: at(ROMA, 530, -60) },
       { via: at(ROMA, 480, 60) },
       { via: at(ROMA, 420, 200) },
@@ -98,7 +98,7 @@ export const ROUTE = {
       { via: at(ROMA, 2, -84) },
       { via: at(ROMA, 8, -102) },
       /* Torre della Scimmia, a nord del Pantheon verso Palazzo Chigi. */
-      { landmark: "tower", name: "Torre della Scimmia", tag: [1, -1], place: at(ROMA, 60, -130), heading: 90, side: -1 },
+      { landmark: "tower", name: "Torre della Scimmia", tag: [-1, -1], place: at(ROMA, 60, -130), heading: 90, side: -1 },
       { via: at(ROMA, 130, -124) },
       { landmark: "spagna", name: "Piazza di Spagna", tag: [1, -1], place: at(ROMA, 190, -201), heading: 90, side: -1 },
       { via: at(ROMA, 300, -150) },
